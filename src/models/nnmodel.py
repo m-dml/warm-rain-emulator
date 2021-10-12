@@ -1,0 +1,87 @@
+
+import numpy as np
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from tqdm.notebook import tqdm
+import torch.optim as optim
+
+
+
+
+
+
+class Network(nn.Module):
+
+    def __init__(self,act,n_layers=5,ns=200,out_features=4,depth=9,p=0.25):
+        
+        super().__init__()
+        
+        
+        self.layers = []
+
+        in_features = depth
+        for i in range(n_layers):
+            
+            self.layers.append(nn.Linear(in_features,ns ))
+            nn.init.kaiming_normal_(self.layers[i].weight, mode='fan_out')
+            in_features=ns
+
+        self.layers.append(nn.Linear(ns,out_features))
+        self.layers = nn.ModuleList(self.layers)
+        self.dropout = nn.Dropout(p)
+        self.activation = act
+        self.n_layers=n_layers
+        
+        
+    def forward(self,x):
+        
+        for i in range(self.n_layers-1):
+            x=self.activation(self.layers[i](x))
+            x = self.dropout(x)
+        
+        
+        x=self.layers[-1](x)
+
+        return x
+
+    
+    
+    
+class plNetwork(nn.Module):
+
+    def __init__(self,act,n_layers=5,ns=200,out_features=4,depth=9,p=0.25):
+        
+        super().__init__()
+        
+        
+        self.layers = []
+
+        in_features = depth
+        for i in range(n_layers):
+            
+            self.layers.append(nn.Linear(in_features,ns ))
+            nn.init.kaiming_normal_(self.layers[i].weight, mode='fan_out')
+            in_features=ns
+
+        self.layers.append(nn.Linear(ns,out_features))
+        self.layers = nn.ModuleList(self.layers)
+        self.dropout = nn.Dropout(p)
+        self.activation = act
+        self.n_layers=n_layers
+        
+    def _forward_impl(self, x):
+        for i in range(self.n_layers-1):
+            x=self.activation(self.layers[i](x))
+            x = self.dropout(x)
+        
+        
+        x=self.layers[-1](x)
+        return x
+        
+    def forward(self,x):
+        return self. _forward_impl(x)
+        
+        
