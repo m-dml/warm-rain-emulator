@@ -9,6 +9,8 @@ from src.models.plModel import LightningModel
 from src.utils.plDataloader import DataModule
 import pytorch_lightning as pl
 
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+
 from pytorch_lightning import Trainer
 
 
@@ -33,9 +35,11 @@ def cli_main():
         callbacks = [pl.callbacks.GPUStatsMonitor()]
 
 
-    checkpoint_callback = ModelCheckpoint(monitor="val_loss", save_top_k=2, mode='min', save_last=True)
+    checkpoint_callback = ModelCheckpoint(monitor="val_loss", save_top_k=1, mode='min', save_last=True)
 
-    trainer = pl.Trainer(callbacks=callbacks, checkpoint_callback=checkpoint_callback, gpus=GPUS, max_epochs=N_EPOCHS,distributed_backend="dp")
+    early_stop = EarlyStopping(monitor="val_loss", patience=10, verbose=True)
+
+    trainer = pl.Trainer(callbacks=callbacks, checkpoint_callback=checkpoint_callback, gpus=GPUS, max_epochs=N_EPOCHS,early_stop_callback=early_stop)
 
     trainer.fit(pl_model,data_module)
 
