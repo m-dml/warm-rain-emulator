@@ -27,7 +27,7 @@ def cli_main():
     data_module.setup()
 
     # setting up the model:
-    pl_model = LightningModel(updates_mean=data_module.updates_mean,updates_std=data_module.updates_std)
+    pl_model = LightningModel(updates_mean=data_module.updates_mean,updates_std=data_module.updates_std,norm="Rel")
 
     if GPUS < 1:
         callbacks = None
@@ -39,7 +39,7 @@ def cli_main():
 
     early_stop = EarlyStopping(monitor="val_loss", patience=10, verbose=True)
 
-    trainer = pl.Trainer(callbacks=callbacks, checkpoint_callback=checkpoint_callback, gpus=GPUS, max_epochs=N_EPOCHS,early_stop_callback=early_stop)
+    trainer = pl.Trainer(checkpoint_callback=checkpoint_callback,callbacks=[checkpoint_callback, early_stop],gpus=GPUS, max_epochs=N_EPOCHS)
 
     trainer.fit(pl_model,data_module)
 
