@@ -48,19 +48,32 @@ class simulation_forecast:
         
     def create_input(self):
         tau=self.sim_data[2]/(self.sim_data[2]+self.sim_data[0])
-        xc=self.sim_data[0]/self.sim_data[1]
+        xc =self.sim_data[0]/self.sim_data[1]
         inputs=np.concatenate((self.sim_data[0:4].reshape(1,-1),tau.reshape(1,-1),xc.reshape(1,-1),self.model_params.reshape(1,-1)),axis=1)
         #new_input_=np.concatenate((predictions_orig_[:,0:],self.model_params.reshape(1,-1),tau.reshape(1,-1),xc.reshape(1,-1)),axis=1)
         
         self.inputs=self.calc_mean(inputs,self.data_module.inputs_mean,self.data_module.inputs_std)
         self.inputs=np.float32(self.inputs)
        
+    def check_updates(self):
+        if self.updates[0,0]>0:
+            self.updates[0,0]=0
+
+        if self.updates[0,2]<0:
+            self.updates[0,2]=0
+
+    def check_preds(self):
+
+        self.preds[self.preds<0]=0       
+
         
     def moment_calc(self,predictions_updates):
         self.updates=(predictions_updates.detach().numpy()*self.data_module.updates_std)+self.data_module.updates_mean
+        self.check_updates()
         #=self.calc_mean(predictions_updates.detach().numpy(),self.data_module.updates_mean,self.data_module.updates_std)
         #x_orig=(x[:4]*(data_module.outputs_std))+data_module.outputs_mean
         self.preds=self.sim_data[0:4]+(self.updates*20)
+        self.check_preds()
         self.moment_preds.append(self.preds)
         self.sim_data=self.preds.reshape(-1,)
         
@@ -125,7 +138,7 @@ class SB_forecast:
         auto = SB_forecast.kcc/(20*SB_forecast.xstar) * (nu+2.0)*(nu+4.0)/(nu+1.0)**2 * self.lc**2 * xc**2
         tau  = self.lr/(self.lc+self.lr+1e-15)
         taup = np.power(tau,SB_forecast.p_phi)
-        phi  = SB_forecast.a_phi * taup * (1.0 - taup)**3
+        phi  = SB_forecast.a_phi * taup * (1.0-taup)**3
         self.auto = auto * (1.0+phi)
 
 
@@ -147,7 +160,7 @@ class SB_forecast:
       
 
     def solve_ode(self):
-        dt=5
+        dt = 5
         xm=SB_forecast.drop_mass(self.rm)
         autoN = 1.0/SB_forecast.xstar*self.auto
         accrN = self.acc/xm
@@ -156,6 +169,3 @@ class SB_forecast:
             self.lr = self.lr + self.auto*dt + self.acc*dt
             self.nc = self.nc - accrN*dt - self.scc*dt
             self.nr = self.nr + autoN*dt - self.scr*dt
-
-             
-                
