@@ -24,7 +24,7 @@ class my_dataset(Dataset):
 class DataModule(pl.LightningDataModule):
 
     def __init__(self, data_dir= "/gpfs/work/sharmas/mc-snow-data/", 
-                 batch_size: int = 256, num_workers: int = 40, transform=None,tot_len=819,test_len=100,sim_num=98,norm="Standard_norm"):
+                 batch_size: int = 256, num_workers: int = 40, transform=None,tot_len=819,test_len=100,sim_num=98,norm="Standard_norm",input_type=None,ic="all"):
         super().__init__()
         
         
@@ -32,7 +32,8 @@ class DataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.transform = transform
-
+        self.input_type = input_type
+        self.ic=ic
         # self.inputs=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/inputs.npy")
         # self.updates=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/updates.npy")
         # self.outputs=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs.npy")
@@ -58,37 +59,27 @@ class DataModule(pl.LightningDataModule):
         with np.load('/gpfs/work/sharmas/mc-snow-data/big_box.npz') as npz:
             self.arr = np.ma.MaskedArray(**npz)
         self.arr=self.arr.astype(np.float32)
-        self.arr=self.arr[:,:,:,:99]
+        self.arr=self.arr[:,:,:,:98]
         self.get_tendency()
         self.get_inputs()
         #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/inputs.npy",self.inputs)
         #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/updates.npy",self.updates)
         #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs.npy",self.outputs)
         #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/meta.npy",self.meta)
-        
+        if self.input_type=="mass":
+            self.inputs[:,1]=self.inputs[:,0]/self.inputs[:,1]
+            self.inputs[:,3]=self.inputs[:,2]/self.inputs[:,3]
+
+            self.outputs[:,1]=self.outputs[:,0]/self.outputs[:,1]
+            self.outputs[:,3]=self.outputs[:,2]/self.outputs[:,3]
+            
         self.test_train()
-        #data_module = AvgplDataloader.DataModule(batch_size=256,num_workers=40)
-
-        #data_module.setup()
-        #self.updates_mean=data_module.updates_mean
-        #self.updates_std=data_module.updates_std
-        #self.outputs_std=data_module.outputs_std
-        #self.outputs_mean=data_module.outputs_mean
-        #self.inputs_mean=data_module.inputs_mean
-        #self.inputs_std=data_module.inputs_std
         
 
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/inputs_mean.npy",self.inputs_mean)
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/updates_mean.npy",self.updates_mean)
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs_mean.npy",self.outputs_mean)
-        
-        
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/inputs_std.npy",self.inputs_std)
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/updates_std.npy",self.updates_std)
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs_std.npy",self.outputs_std)
+       
 
 
-        
+    
         
         
     def calc_mask(self,unmaksed,start=0):
@@ -103,9 +94,13 @@ class DataModule(pl.LightningDataModule):
     #Works well
     def get_tendency(self):
         print("Starting to calculate tendencies")
-        
+        if self.ic=="small":
+            self.remove_ic()
+            print("Removed problematic ICs")
         self.new_arr=np.delete((self.arr[:,:,:,:]),[3,6],1)
         output_tend_all=[]
+        
+        
         for i in range (self.tot_len):
             
            
@@ -114,8 +109,12 @@ class DataModule(pl.LightningDataModule):
             l=(np.ma.compress_rows(self.arr[:,1:5,i,0])).shape[0]
             a_arr= self.new_arr [:l-1,1:5,i,:]
             b_arr= self.new_arr [1:l,1:5,i,:] 
+            
             if self.normalize=="Rel":
-                c_arr=(b_arr-a_arr)/(20*a_arr)
+                c_arr=(b_arr-a_arr)/(20)
+                a_arr[a_arr==0]=1e-14
+                c_arr=a_arr
+                
 
             else:
                  c_arr=(b_arr-a_arr)/20
@@ -140,6 +139,16 @@ class DataModule(pl.LightningDataModule):
 
         print("Calculated tendencies")
             
+    def remove_ic(self):
+        k = self.arr[0,-2,:,:]
+        idx_nu=[np.where((k[:,0]>1.5))]
+
+        k= self.arr[0,-4,:,:]
+        idx_lo=[np.where((k[:,0]<0.0008))]
+
+        idx_nu.append(idx_lo)
+        self.arr=np.delete((self.arr[:,:,:,:]),idx_nu,2)
+        
         
     def get_inputs(self):
        
@@ -172,6 +181,7 @@ class DataModule(pl.LightningDataModule):
             
             inputs=np.concatenate((sim_data_1,tau.reshape(-1,1),xc.reshape(-1,1),sim_data_2),axis=1)
             
+                 
       
                 
             input_all.append(inputs)
@@ -184,8 +194,8 @@ class DataModule(pl.LightningDataModule):
         print("Inputs Created")
         
         
-        self.sim_dataset_inputs=np.asarray(input_all)[:,self.tot_len-self.test_len:]
-        self.sim_dataset_meta=np.asarray(meta_all)[:,self.tot_len-self.test_len:]
+        #self.sim_dataset_inputs=np.asarray(input_all)[:,self.tot_len-self.test_len:]
+        #self.sim_dataset_meta=np.asarray(meta_all)[:,self.tot_len-self.test_len:]
     
     
     
@@ -207,7 +217,7 @@ class DataModule(pl.LightningDataModule):
             
                
                     
-            k=data[i,:]
+            k=data[i]
             #new_x = np.ma.masked_array(sim_data, masked_data.mask[:,:,i,j])
             #k=np.ma.compress_rows(new_x)
             if norm_data is None:
@@ -237,8 +247,13 @@ class DataModule(pl.LightningDataModule):
     
     
     def test_train(self):
+
          
-            
+            self.inputs=np.asarray(self.inputs) 
+            self.meta=np.asarray(self.meta)
+            self.outputs=np.asarray(self.outputs)
+            self.updates=np.asarray(self.updates)
+                     
             self.start_test=int(self.inputs.shape[0]-self.inputs.shape[0]*0.1)
             
             self.test_dataset=my_dataset(self.inputs[self.start_test:,:],self.meta[self.start_test:,:],self.updates[self.start_test:,:],self.outputs[self.start_test:,:])
