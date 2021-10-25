@@ -13,6 +13,7 @@ class simulation_forecast:
         self.data_module=data_module
         self.model=new_model
         self.moment_preds=[]
+        self.updates_prev=None
         
     def setup(self):
         
@@ -20,11 +21,13 @@ class simulation_forecast:
         arr=self.arr.astype(np.float32)
         #self.arr=np.mean(arr[:,:,719:-1,:],axis=-1)
         arr_new=np.delete((arr[:,:,:]),[3,6],1)
+        
         k=np.ma.getmask(self.arr)
         k_new=np.delete((k[:,:,:]),[3,6],1)
         self.test_sims = np.ma.masked_where(k_new, arr_new)
         print(self.test_sims.shape)
-        
+
+    #For testing    
     def test(self):
         self.setup()
         self.orig=np.ma.compress_rows(self.test_sims[:,1:5,self.sim_number])
@@ -41,11 +44,11 @@ class simulation_forecast:
             predictions_updates=self.model.forward(torch.from_numpy(self.inputs))
             self.moment_calc(predictions_updates)
             
-        
+    #For Calculation of Moments    
     def calc_mean(self,no_norm,means,stds):
          return (no_norm-means.reshape(-1,))/stds.reshape(-1,)
         
-        
+    #For creation of inputs   
     def create_input(self):
         tau=self.sim_data[2]/(self.sim_data[2]+self.sim_data[0])
         xc =self.sim_data[0]/self.sim_data[1]
@@ -54,7 +57,8 @@ class simulation_forecast:
         
         self.inputs=self.calc_mean(inputs,self.data_module.inputs_mean,self.data_module.inputs_std)
         self.inputs=np.float32(self.inputs)
-       
+
+    #For checking updates   
     def check_updates(self):
         if self.updates[0,0]>0:
             self.updates[0,0]=0
@@ -64,7 +68,17 @@ class simulation_forecast:
 
     def check_preds(self):
 
-        self.preds[self.preds<0]=0       
+        if self.preds[0,0]<0:
+            self.preds[0,0] = 0
+            
+        if self.preds[0,2]>self.model_params[0]:
+            self.preds[0,2] = self.model_params[0]
+            
+            #self.preds[0,2] = 0
+            
+        if self.preds[0,1]< 0:
+            self.preds[0,1] = (np.asarray(self.moment_preds).squeeze())[-1,1]
+            
 
         
     def moment_calc(self,predictions_updates):
@@ -76,7 +90,7 @@ class simulation_forecast:
         self.check_preds()
         self.moment_preds.append(self.preds)
         self.sim_data=self.preds.reshape(-1,)
-        
+        self.updates_prev=self.updates
 
 class SB_forecast:
     
@@ -103,6 +117,7 @@ class SB_forecast:
         self.nc=arr[0,2,sim_num]
         self.lr=arr[0,4,sim_num]
         self.nr=arr[0,5,sim_num]
+        
         
         self.auto=None
         self.acc=None
@@ -133,8 +148,8 @@ class SB_forecast:
 
     def autoconSB(self):
     
-        nu=self.nu
-        xc=self.lc/self.nc
+        nu = self.nu
+        xc = self.lc/self.nc
         auto = SB_forecast.kcc/(20*SB_forecast.xstar) * (nu+2.0)*(nu+4.0)/(nu+1.0)**2 * self.lc**2 * xc**2
         tau  = self.lr/(self.lc+self.lr+1e-15)
         taup = np.power(tau,SB_forecast.p_phi)
@@ -148,7 +163,7 @@ class SB_forecast:
         phi = (tau / (tau + 5e-4))**4
         self.acc = SB_forecast.kcr * self.lc * self.lr * phi
         
-
+    
     def selfcloudSB(self):
      
         self.scc= SB_forecast.kcc * (self.nu+2.0)/(self.nu+1.0) * self.lc**2
