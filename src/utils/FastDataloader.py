@@ -24,7 +24,8 @@ class my_dataset(Dataset):
 class DataModule(pl.LightningDataModule):
 
     def __init__(self, data_dir= "/gpfs/work/sharmas/mc-snow-data/", 
-                 batch_size: int = 256, num_workers: int = 40, transform=None,tot_len=819,test_len=100,sim_num=98,norm="Standard_norm",input_type=None,ic="all"):
+                 batch_size: int = 256, num_workers: int = 40, transform=None,tot_len=819,
+                 test_len=100,sim_num=98,norm="Standard_norm",input_type=None,ic="all",arr=None):
         super().__init__()
         
         
@@ -48,7 +49,7 @@ class DataModule(pl.LightningDataModule):
         # self.updates_std=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/updates_std.npy")
         # self.outputs_std=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs_std.npy")
 
-        self.arr=None
+        self.arr=arr
         self.test_len=test_len
         self.tot_len=tot_len
         self.sim_num=sim_num
@@ -95,60 +96,68 @@ class DataModule(pl.LightningDataModule):
     def get_tendency(self):
         print("Starting to calculate tendencies")
         if self.ic=="small":
-            self.remove_ic()
+            self.test_len=1
+            #self.remove_ic()
             print("Removed problematic ICs")
         self.new_arr=np.delete((self.arr[:,:,:,:]),[3,6],1)
-        output_tend_all=[]
+        self.output_tend_all=[]
         
-        
+        self.length=0
         for i in range (self.tot_len):
+            #print(self.arr[0,-4,i,0])
+            if self.ic=="small":
+                if ((self.arr[0,-4,i,0]>0.0008) and (self.arr[0,-2,i,0]<1.5)):
+                    self.length+=1
+                    #print ("Going here")
+                    l=(np.ma.compress_rows(self.arr[:,1:5,i,0])).shape[0]
             
-           
+                    a_arr= self.new_arr [:l-1,1:5,i,:]
+                    b_arr= self.new_arr [1:l,1:5,i,:] 
+                    c_arr=(b_arr-a_arr)/20
+                    #print (a_arr.shape)
+                    self.output_tend= c_arr.transpose(0,2,1).reshape(-1,4)
+                    self.output_tend_all.append(self.output_tend)
             
+                    
             
-            l=(np.ma.compress_rows(self.arr[:,1:5,i,0])).shape[0]
-            a_arr= self.new_arr [:l-1,1:5,i,:]
-            b_arr= self.new_arr [1:l,1:5,i,:] 
-            
-            if self.normalize=="Rel":
-                c_arr=(b_arr-a_arr)/(20)
-                a_arr[a_arr==0]=1e-14
-                c_arr=a_arr
+            else:
+                
+                l=(np.ma.compress_rows(self.arr[:,1:5,i,0])).shape[0]
+
+                a_arr= self.new_arr [:l-1,1:5,i,:]
+                b_arr= self.new_arr [1:l,1:5,i,:] 
+
+                if self.normalize=="Rel":
+                    c_arr=(b_arr-a_arr)/(20)
+                    a_arr[a_arr==0]=1e-14
+                    c_arr=a_arr
                 
 
-            else:
-                 c_arr=(b_arr-a_arr)/20
-            output_tend= c_arr.transpose(0,2,1).reshape(-1,4)
+                else:
+                     c_arr=(b_arr-a_arr)/20
+                self.output_tend= c_arr.transpose(0,2,1).reshape(-1,4)
                    
                 
 
                 
 
-            output_tend_all.append(output_tend)
+                self.output_tend_all.append(self.output_tend)
        
         
         
-        self.output_tend_all=(np.asarray(output_tend_all))
+        self.output_tend_all=(np.asarray(self.output_tend_all))
         
         if self.normalize=="Rel":
-            self.updates=self.norm(np.asarray(output_tend_all),do_norm=0)
+            self.updates=self.norm(np.asarray(self.output_tend_all),do_norm=0)
             self.updates_mean=None
             self.updates_std=None
         else:
-            self.updates,self.updates_mean, self.updates_std=self.norm(np.asarray(output_tend_all))
+            
+            self.updates,self.updates_mean, self.updates_std=self.norm(np.asarray(self.output_tend_all))
 
         print("Calculated tendencies")
             
-    def remove_ic(self):
-        k = self.arr[0,-2,:,:]
-        idx_nu=[np.where((k[:,0]>1.5))]
-
-        k= self.arr[0,-4,:,:]
-        idx_lo=[np.where((k[:,0]<0.0008))]
-
-        idx_nu.append(idx_lo)
-        self.arr=np.delete((self.arr[:,:,:,:]),idx_nu,2)
-        
+    
         
     def get_inputs(self):
        
@@ -158,35 +167,59 @@ class DataModule(pl.LightningDataModule):
         output_all=[]
         
         print ("Starting to create inputs")
+        
         for i in range (self.tot_len):
             inputs_sim=[]
             meta_sim=[]
             outputs_sim=[]
 
+            if self.ic=="small":
+                if ((self.arr[0,-4,i,0]>0.0008) and (self.arr[0,-2,i,0]<1.5)):
+                    l=(np.ma.compress_rows(self.arr[:,1:5,i,0])).shape[0]
+                    meta=self.new_arr[:l-1,7:13,i,:]
+                    meta=meta.transpose(0,2,1).reshape(-1,6)
 
-            l=(np.ma.compress_rows(self.arr[:,1:5,i,0])).shape[0]
-            meta=self.new_arr[:l-1,7:13,i,:]
-            meta=meta.transpose(0,2,1).reshape(-1,6)
-            
-            tau=self.new_arr[:l-1,3,i,:]/(self.new_arr[:l-1,3,i,:]+self.new_arr[:l-1,1,i,:])
-            xc = self.new_arr[:l-1,1,i,:]/(self.new_arr[:l-1,2,i,:])
-                                         
-            outputs = self.new_arr[1:l,1:5,i,:]
-            outputs=outputs.transpose(0,2,1).reshape(-1,4)
-            
-            sim_data=self.new_arr[:l-1,1:5,i,:]
-            sim_data_1=sim_data.transpose(0,2,1).reshape(-1,4)
-            sim_data_2=self.new_arr[:l-1,-4:-1,i,:]
-            sim_data_2=sim_data_2.transpose(0,2,1).reshape(-1,3)
-            
-            inputs=np.concatenate((sim_data_1,tau.reshape(-1,1),xc.reshape(-1,1),sim_data_2),axis=1)
+                    tau=self.new_arr[:l-1,3,i,:]/(self.new_arr[:l-1,3,i,:]+self.new_arr[:l-1,1,i,:])
+                    xc = self.new_arr[:l-1,1,i,:]/(self.new_arr[:l-1,2,i,:])
+
+                    outputs = self.new_arr[1:l,1:5,i,:]
+                    outputs=outputs.transpose(0,2,1).reshape(-1,4)
+
+                    sim_data=self.new_arr[:l-1,1:5,i,:]
+                    sim_data_1=sim_data.transpose(0,2,1).reshape(-1,4)
+                    sim_data_2=self.new_arr[:l-1,-4:-1,i,:]
+                    sim_data_2=sim_data_2.transpose(0,2,1).reshape(-1,3)
+
+                    inputs=np.concatenate((sim_data_1,tau.reshape(-1,1),xc.reshape(-1,1),sim_data_2),axis=1)
             
                  
       
                 
-            input_all.append(inputs)
-            meta_all.append(meta)
-            output_all.append(outputs)
+                    input_all.append(inputs)
+                    meta_all.append(meta)
+                    output_all.append(outputs)
+            else:
+                
+                l=(np.ma.compress_rows(self.arr[:,1:5,i,0])).shape[0]
+                meta=self.new_arr[:l-1,7:13,i,:]
+                meta=meta.transpose(0,2,1).reshape(-1,6)
+
+                tau=self.new_arr[:l-1,3,i,:]/(self.new_arr[:l-1,3,i,:]+self.new_arr[:l-1,1,i,:])
+                xc = self.new_arr[:l-1,1,i,:]/(self.new_arr[:l-1,2,i,:])
+
+                outputs = self.new_arr[1:l,1:5,i,:]
+                outputs=outputs.transpose(0,2,1).reshape(-1,4)
+
+                sim_data=self.new_arr[:l-1,1:5,i,:]
+                sim_data_1=sim_data.transpose(0,2,1).reshape(-1,4)
+                sim_data_2=self.new_arr[:l-1,-4:-1,i,:]
+                sim_data_2=sim_data_2.transpose(0,2,1).reshape(-1,3)
+
+                inputs=np.concatenate((sim_data_1,tau.reshape(-1,1),xc.reshape(-1,1),sim_data_2),axis=1)
+
+                input_all.append(inputs)
+                meta_all.append(meta)
+                output_all.append(outputs)
         
         self.inputs,self.inputs_mean,self.inputs_std=self.norm(np.asarray(input_all))
    
@@ -208,25 +241,43 @@ class DataModule(pl.LightningDataModule):
     
     def norm(self,data,do_norm=1):
         norm_data=None
-        for i in range (self.tot_len):
-            # if i== (self.tot_len-self.test_len):
-       
-            #     print ("Testing Dataset starts here")
-            #     print(norm_data.shape)  
-            #     self.start_test=norm_data.shape[0]
+        if self.length >0:
+            for i in range (self.length):
             
                
                     
-            k=data[i]
-            #new_x = np.ma.masked_array(sim_data, masked_data.mask[:,:,i,j])
-            #k=np.ma.compress_rows(new_x)
-            if norm_data is None:
-                norm_data=k
+                k=data[i]
+
+                if norm_data is None:
+                    norm_data=k
+
+
+
+                else:
+                    norm_data=np.concatenate((norm_data,k),axis=0)
                 
                 
-                
-            else:
-                norm_data=np.concatenate((norm_data,k),axis=0)
+        else:
+            
+            for i in range (self.tot_len):
+                # if i== (self.tot_len-self.test_len):
+
+                #     print ("Testing Dataset starts here")
+                #     print(norm_data.shape)  
+                #     self.start_test=norm_data.shape[0]
+
+
+
+                k=data[i]
+                #new_x = np.ma.masked_array(sim_data, masked_data.mask[:,:,i,j])
+                #k=np.ma.compress_rows(new_x)
+                if norm_data is None:
+                    norm_data=k
+
+
+
+                else:
+                    norm_data=np.concatenate((norm_data,k),axis=0)
                 
                 
         
@@ -237,7 +288,8 @@ class DataModule(pl.LightningDataModule):
 
 
             b_std=np.std(norm_data,axis=0)
-
+            b_std[b_std==0]=1
+            
             new_data=(norm_data-b_mean)/b_std
 
             return new_data,b_mean, b_std
@@ -293,5 +345,3 @@ class DataModule(pl.LightningDataModule):
                           shuffle=False)
 
                 
-        
-        
