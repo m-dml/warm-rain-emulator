@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from src.utils import AvgplDataloader
+
 
 
 class my_dataset(Dataset):
@@ -77,12 +77,6 @@ class DataModule(pl.LightningDataModule):
         self.test_train()
         
 
-       
-
-
-    
-        
-        
     def calc_mask(self,unmaksed,start=0):
         print(unmaksed.shape)
         cols=unmaksed.shape[3]
@@ -128,9 +122,9 @@ class DataModule(pl.LightningDataModule):
                 b_arr= self.new_arr [1:l,1:5,i,:] 
 
                 if self.normalize=="Rel":
-                    c_arr=(b_arr-a_arr)/(20)
+                    c_arr=(b_arr-a_arr)
                     a_arr[a_arr==0]=1e-14
-                    c_arr=a_arr
+                    c_arr=c_arr/a_arr
                 
 
                 else:
@@ -148,9 +142,10 @@ class DataModule(pl.LightningDataModule):
         self.output_tend_all=(np.asarray(self.output_tend_all))
         
         if self.normalize=="Rel":
-            self.updates=self.norm(np.asarray(self.output_tend_all),do_norm=0)
-            self.updates_mean=None
-            self.updates_std=None
+            #self.updates=self.norm(np.asarray(self.output_tend_all),do_norm=0)
+            #self.updates_mean=None
+            #self.updates_std=None
+            self.updates,self.updates_mean, self.updates_std=self.norm(np.asarray(self.output_tend_all))
         else:
             
             self.updates,self.updates_mean, self.updates_std=self.norm(np.asarray(self.output_tend_all))
@@ -310,10 +305,6 @@ class DataModule(pl.LightningDataModule):
             
             self.test_dataset=my_dataset(self.inputs[self.start_test:,:],self.meta[self.start_test:,:],self.updates[self.start_test:,:],self.outputs[self.start_test:,:])
             self.dataset=my_dataset(self.inputs[:self.start_test,:],self.meta[:self.start_test,:],self.updates[:self.start_test,:],self.outputs[:self.start_test,:])
-            
-        
-      
-            
             shuffle_dataset = True
 
 
