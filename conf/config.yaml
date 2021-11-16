@@ -1,0 +1,23 @@
+tot_len: 819
+test_len: 100
+sim_num: 98
+input_type: null
+
+batch_size: 256 
+beta: 0.35
+learning_rate: 2e-4
+
+act: torch.nn.ReLU()
+  
+n_layers: 5
+ns: 200
+out_features: 4
+depth: 9
+p: 0.25
+norm: Standard_Norm
+inputs_mean: null
+inputs_std: null
+ic: All
+use_regularizer: False
+multi_step: False
+step_size: null

@@ -8,39 +8,47 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from src.models.plModel import LightningModel
 from src.utils.FastDataloader import DataModule
 import pytorch_lightning as pl
-
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-
 from pytorch_lightning import Trainer
-
-if len(sys.argv)>1:
-    n_layers = int(sys.argv[1])
-    ns=int(sys.argv[2])
-else:
-    n_layers=5
-    ns=200
+import os
+from omegaconf import OmegaConf
 
 GPUS = 1
 N_EPOCHS = 100
+
+if len(sys.argv)>1:
+    file_name = sys.argv[1]
+    
+else:
+    file_name = "config.yaml"
+
+CONFIG_PATH = "conf/"
+def load_config(config_name):
+    with open(os.path.join(CONFIG_PATH, config_name)) as file:
+        config = OmegaConf.load(file)
+
+    return config
+
 
 def cli_main():
     pl.seed_everything(42)
 
 
 
-    data_module = DataModule(batch_size=256,num_workers=1,tot_len=819,ic="small")
+    data_module = DataModule(batch_size=config.batch_size,tot_len=config.tot_len,
+                             test_len=config.test_len,sim_num=config.sim_num,norm=config.norm,
+                             input_type=config.input_type,ic=config.ic)
     data_module.setup()
 
     # setting up the model:
     pl_model = LightningModel(updates_mean=data_module.updates_mean,updates_std=data_module.updates_std,
-                              inputs_mean=data_module.inputs_mean,inputs_std=data_module.inputs_std, norm="Rel",
-                              n_layers=n_layers,ns=ns,ic="small")
-
-    if GPUS < 1:
-        callbacks = None
-    else:
-        callbacks = [pl.callbacks.GPUStatsMonitor()]
-
+                              inputs_mean=data_module.inputs_mean,inputs_std=data_module.inputs_std,
+                              batch_size=config.batch_size,beta=config.beta,
+                              learning_rate=config.learning_rate,act=eval(config.act), 
+                              depth=config.depth,p=config.p, norm=config.norm,
+                              n_layers=config.n_layers,ns=config.ns,use_regularizer=config.use_regularizer,
+                              )
+    
 
     checkpoint_callback = ModelCheckpoint(monitor="val_loss", save_top_k=1, mode='min', save_last=True)
 
@@ -54,5 +62,5 @@ def cli_main():
 
 
 if __name__ == '__main__':
-     _dm,_model, _trainer = cli_main() 
-
+    config = load_config(file_name+".yaml")
+    _dm,_model, _trainer = cli_main() 
