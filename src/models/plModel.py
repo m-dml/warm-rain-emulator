@@ -67,10 +67,26 @@ class LightningModel(pl.LightningModule):
             Lr=(pred[:,2]*self.updates_std[2])+self.updates_mean[2]
             mass_cons= criterion(Lc,(-Lr))
             if self.loss_absolute==True:
-                real_pred=(pred[:,:]*self.updates_std.reshape(1,-1)) + self.updates_mean.reshape(1,-1)
-                real_x=(x[:,:]*self.inputs_std.reshape(1,-1)) + self.inputs_mean.reshape(1,-1)
-                pred_moment=real_x + real_pred*20
-                pred_loss= criterion(pred_moment,y)
+
+                real_pred=torch.empty((pred.shape), dtype=torch.float32, device = 'cuda')
+                real_x=torch.empty((pred.shape), dtype=torch.float32,device = 'cuda')
+                real_y=torch.empty((y.shape), dtype=torch.float32,device = 'cuda')
+               
+                for i in range (4): # Removing Norm
+                    real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
+                    real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
+                    
+                    
+
+                print ("This worked")
+                    
+                pred_moment = real_x + real_pred*20
+                pred_moment_norm = torch.empty((y.shape), dtype=torch.float32,device = 'cuda')
+                
+                for i in range (4): # Normalizing the moment
+                    pred_moment_norm[:,i] = (pred_moment[:,i] - self.inputs_mean[i]) / self.inputs_std[i]
+                    
+                pred_loss= criterion(pred_moment_norm,y)
                  
             elif self.loss_absolute==False:
                 pred_loss= criterion(updates,pred)
