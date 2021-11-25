@@ -124,31 +124,36 @@ class LightningModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x,updates,rates,y = batch
         loss=0.0
+        
         for k in range (0,self.step_size*4,4):
+            
             #self.forward(x,updates,rates,y)
             
             logits = self.forward(x.float())
             
             loss += self.loss_function(logits.float(), updates[:,k:k+4].float(),x.float(),y[:,k:k+4].float())
+            x=(self.calc_new_x(x,logits,y[:,k:k+4].float())).float()
+           
             
-            x=logits.float()
+            
         # Add logging
         self.log("train_loss", loss)
   
         return loss
+
     
-
-
+    
     def validation_step(self, batch, batch_idx):
         x,updates,rates,y = batch
         loss=0.0
-        for k in range (0,self.step_size*4,4):
+        
+        for k in range (0,int(self.step_size*4),4):
+            
             #self.forward(x,updates,rates,y)
             logits = self.forward(x.float())
             loss += self.loss_function(logits.float(), updates[:,k:k+4].float(),x.float(),y[:,k:k+4].float())
-            x=logits.float()
-       
-       
+            x=(self.calc_new_x(x,logits,y[:,k:k+4].float())).float()
+           
         self.log("val_loss", loss)
         return loss
 
@@ -164,3 +169,32 @@ class LightningModel(pl.LightningModule):
         predictions_actual.append(y)
         return logits,y
     
+    def calc_new_x(self,x,pred,y): 
+        #un-normalize logits
+        real_pred=torch.empty((pred.shape), dtype=torch.float32, device = 'cuda')
+        real_x=torch.empty((pred.shape), dtype=torch.float32,device = 'cuda')
+        
+        for i in range (4): # Removing Norm
+            real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
+            real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
+
+        #calc new x
+        
+        
+        pred_moment = real_x + real_pred*20
+        pred_moment_norm = torch.empty((x.shape), dtype=torch.float32,device = 'cuda')
+        
+        #normalize x
+        for i in range (4):
+            pred_moment_norm[:,i] = (pred_moment[:,i] - self.inputs_mean[i]) / self.inputs_std[i]
+            
+        #z=torch.full((pred_moment.shape[0],), 1e-14).to('cuda')
+        
+        tau=pred_moment[:,2]/(pred_moment[:,2]+pred_moment[:,0])
+        xc = pred_moment[:,0]/  pred_moment[:,1]
+        
+        pred_moment_norm[:,4] = (tau - self.inputs_mean[4]) / self.inputs_std[4]
+        pred_moment_norm[:,5] = (xc - self.inputs_mean[5]) / self.inputs_std[5]
+        pred_moment_norm[:,6:]=x[:,6:]
+        
+        return pred_moment_norm
