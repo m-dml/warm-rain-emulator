@@ -36,20 +36,6 @@ class DataModule(pl.LightningDataModule):
         self.transform = transform
         self.input_type = input_type
         self.ic=ic
-        # self.inputs=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/inputs.npy")
-        # self.updates=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/updates.npy")
-        # self.outputs=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs.npy")
-        # self.meta=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/meta.npy")
-        
-        # self.inputs_mean=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/inputs_mean.npy")
-        # self.updates_mean=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/updates_mean.npy")
-        # self.outputs_mean=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs_mean.npy")
-        
-        
-        # self.inputs_std=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/inputs_std.npy")
-        # self.updates_std=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/updates_std.npy")
-        # self.outputs_std=np.load("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs_std.npy")
-
         self.arr=arr
         self.test_len=test_len
         self.tot_len=tot_len
@@ -62,33 +48,21 @@ class DataModule(pl.LightningDataModule):
         with np.load('/gpfs/work/sharmas/mc-snow-data/big_box.npz') as npz:
             self.arr = np.ma.MaskedArray(**npz)
         self.arr=self.arr.astype(np.float32)
-        self.arr=self.arr[:,:,:,:self.sim_num]
-        self.get_tendency()
-        self.get_inputs()
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/inputs.npy",self.inputs)
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/updates.npy",self.updates)
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/outputs.npy",self.outputs)
-        #np.save("/gpfs/work/sharmas/mc-snow-data/rel_update/meta.npy",self.meta)
-        if self.input_type=="mass":
-            self.inputs[:,1]=self.inputs[:,0]/self.inputs[:,1]
-            self.inputs[:,3]=self.inputs[:,2]/self.inputs[:,3]
-
-            self.outputs[:,1]=self.outputs[:,0]/self.outputs[:,1]
-            self.outputs[:,3]=self.outputs[:,2]/self.outputs[:,3]
-            
-        self.test_train()
+        self.arr=self.arr[:,:,:self.tot_len,:self.sim_num]
+        self.holdout()  # For creating a holdout dataset
+        self.get_tendency() #For calculating tendencies
+        self.get_inputs()   #For calculating inputs, outputs
+        self.test_train()   #For train/val/test split; Note: Val dataset is used as a dummy test dataset
         
 
-    def calc_mask(self,unmaksed,start=0):
-        print(unmaksed.shape)
-        cols=unmaksed.shape[3]
-        rows=unmaksed.shape[2]
-        m=(self.arr[start:rows+start,:cols,:,:])
-        print(m.shape)
-        print(unmaksed.shape)
-        return m
+    def holdout(self):
+        all_id=np.random.permutation(self.arr.shape[-2])
+        self.test_id=all_id[:self.test_len] #100 sims for testing later
+        self.train_id=all_id[self.test_len:] 
+        self.holdout_arr=self.arr[:,:,self.test_id,:]
+        self.arr=self.arr[:,:,self.train_id,:]
         
-    #Works well
+   
     def get_tendency(self):
         print("Starting to calculate tendencies")
         if self.ic=="small":
@@ -131,7 +105,7 @@ class DataModule(pl.LightningDataModule):
 
                 else:
                      c_arr=(b_arr-a_arr)/20
-
+                # For arranging updates in 4*step_size columns : 4 stands for 4 moments
                 tot_row=l-self.step_size
                 tot_col=self.step_size*4
                 new_output_tend=np.empty((tot_row,tot_col,self.sim_num))
@@ -148,9 +122,7 @@ class DataModule(pl.LightningDataModule):
         self.output_tend_all=(np.asarray(self.output_tend_all))
         
         if self.normalize=="Rel":
-            #self.updates=self.norm(np.asarray(self.output_tend_all),do_norm=0)
-            #self.updates_mean=None
-            #self.updates_std=None
+            
             self.updates,self.updates_mean, self.updates_std=self.norm(np.asarray(self.output_tend_all))
         else:
             
@@ -219,6 +191,8 @@ class DataModule(pl.LightningDataModule):
                 xc = self.new_arr[:l-self.step_size,1,i,:]/(self.new_arr[:l-self.step_size,2,i,:])
 
                 outputs = self.new_arr[1:l,1:5,i,:]
+                
+                # For arranging output in 4*step_size columns : 4 stands for 4 moments
                 tot_row=l-self.step_size
                 tot_col=self.step_size*4
                 new_output=np.empty((tot_row,tot_col,self.sim_num))
@@ -232,9 +206,9 @@ class DataModule(pl.LightningDataModule):
                 #outputs=outputs.transpose(0,2,1).reshape(-1,4)
 
                 sim_data=self.new_arr[:l-self.step_size,1:5,i,:]
-                sim_data_1=sim_data.transpose(0,2,1).reshape(-1,4)
+                sim_data_1=sim_data.transpose(2,0,1).reshape(-1,4)
                 sim_data_2=self.new_arr[:l-self.step_size,-4:-1,i,:]
-                sim_data_2=sim_data_2.transpose(0,2,1).reshape(-1,3)
+                sim_data_2=sim_data_2.transpose(2,0,1).reshape(-1,3)
 
                 inputs=np.concatenate((sim_data_1,tau.reshape(-1,1),xc.reshape(-1,1),sim_data_2),axis=1)
         
@@ -352,10 +326,10 @@ class DataModule(pl.LightningDataModule):
             self.outputs=np.asarray(self.outputs)
             self.updates=np.asarray(self.updates)
                      
-            self.start_test=int(self.inputs.shape[0]-self.inputs.shape[0]*0.1)
-            
-            self.test_dataset=my_dataset(self.inputs[self.start_test:,:],self.meta[self.start_test:,:],self.updates[self.start_test:,:],self.outputs[self.start_test:,:])
-            self.dataset=my_dataset(self.inputs[:self.start_test,:],self.meta[:self.start_test,:],self.updates[:self.start_test,:],self.outputs[:self.start_test,:])
+            #self.start_test=int(self.inputs.shape[0]-self.inputs.shape[0]*0.1)
+            #self.test_dataset=my_dataset(self.inputs[self.start_test:,:],self.meta[self.start_test:,:],self.updates[self.start_test:,:],self.outputs[self.start_test:,:])
+
+            self.dataset=my_dataset(self.inputs[:,:],self.meta[:,:],self.updates[:,:],self.outputs[:,:])
             shuffle_dataset = True
 
 
@@ -363,8 +337,9 @@ class DataModule(pl.LightningDataModule):
             
 
             
-            train_size = int(0.9 * self.start_test)
-            val_size = self.start_test - train_size
+            train_size = int(0.9 * self.inputs.shape[0])
+            #self.test_dataset=my_dataset(self.inputs)
+            val_size = self.inputs.shape[0] - train_size
           
 
             self.train_dataset, self.val_dataset = torch.utils.data.random_split(self.dataset, [train_size, val_size])
@@ -382,8 +357,9 @@ class DataModule(pl.LightningDataModule):
         return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_workers,
                           shuffle=False)
 
-    def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers,
+    def test_dataloader(self): #Only for quick checks
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.num_workers,
                           shuffle=False)
+
 
                 
