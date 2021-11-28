@@ -48,7 +48,7 @@ class DataModule(pl.LightningDataModule):
         with np.load('/gpfs/work/sharmas/mc-snow-data/big_box.npz') as npz:
             self.arr = np.ma.MaskedArray(**npz)
         self.arr=self.arr.astype(np.float32)
-        self.arr=self.arr[:,:,:self.tot_len,:self.sim_num]
+        self.arr=self.arr[:,:,:self.tot_len+1,:self.sim_num]
         self.holdout()  # For creating a holdout dataset
         self.get_tendency() #For calculating tendencies
         self.get_inputs()   #For calculating inputs, outputs
