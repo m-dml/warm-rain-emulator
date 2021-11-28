@@ -13,14 +13,16 @@ from pytorch_lightning import Trainer
 import os
 from omegaconf import OmegaConf
 
-GPUS = 1
-N_EPOCHS = 100
+
+
+
+
 
 if len(sys.argv)>1:
     file_name = sys.argv[1]
     
 else:
-    file_name = "config.yaml"
+    file_name = "config"
 
 CONFIG_PATH = "conf/"
 def load_config(config_name):
@@ -29,24 +31,27 @@ def load_config(config_name):
 
     return config
 
+GPUS = 1
+
 
 def cli_main():
     pl.seed_everything(42)
-
+    N_EPOCHS = config.max_epochs
 
 
     data_module = DataModule(batch_size=config.batch_size,tot_len=config.tot_len,
                              test_len=config.test_len,sim_num=config.sim_num,norm=config.norm,
-                             input_type=config.input_type,ic=config.ic)
+                             input_type=config.input_type,ic=config.ic,step_size=config.step_size)
     data_module.setup()
 
     # setting up the model:
     pl_model = LightningModel(updates_mean=data_module.updates_mean,updates_std=data_module.updates_std,
                               inputs_mean=data_module.inputs_mean,inputs_std=data_module.inputs_std,
                               batch_size=config.batch_size,beta=config.beta,
-                              learning_rate=config.learning_rate,act=eval(config.act), 
+                              learning_rate=config.learning_rate,act=eval(config.act), loss_func=config.loss_function,
                               depth=config.depth,p=config.p, norm=config.norm,
                               n_layers=config.n_layers,ns=config.ns,use_regularizer=config.use_regularizer,
+                              loss_absolute=config.loss_absolute,multi_step=config.multi_step,step_size=config.step_size
                               )
     
 
