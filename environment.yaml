@@ -1,0 +1,24 @@
+name: warm-rain
+
+channels:
+  - conda-forge
+  - pytorch
+
+dependencies:
+  - python=3.8
+  - pip
+  - cudatoolkit
+  - pytorch
+  - omegaconf 
+  - tensorboard
+  - torchvision
+  - pytorch-lightning
+  - torchmetrics
+  - matplotlib  
+  - ipython
+  - jupyterlab
+  - scikit-learn
+  - numpy
+  - seaborn
+  - tqdm
+ 
