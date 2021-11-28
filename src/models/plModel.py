@@ -20,6 +20,7 @@ class LightningModel(pl.LightningModule):
                  depth=9,p=0.25, norm="Standard_Norm",inputs_mean=None,inputs_std=None,ic="All",
                  use_regularizer=False,multi_step=False,step_size=1,loss_absolute=False):
         super().__init__()
+        #self.automatic_optimization = False
         self.lr=learning_rate
         self.loss_func = loss_func
         self.beta=beta
@@ -35,7 +36,7 @@ class LightningModel(pl.LightningModule):
         self.loss_absolute=loss_absolute
         self.multi_step=multi_step
         self.step_size=step_size
-
+        self.num_workers=48
         self.save_hyperparameters() 
 
     @staticmethod
@@ -51,12 +52,13 @@ class LightningModel(pl.LightningModule):
         return predictions
        
     
-    def loss_function(self,pred,updates,x,y):
+    def loss_function(self,pred,updates,x,y,loss):
         if self.loss_func=="mse":
             criterion=torch.nn.MSELoss()
         elif self.loss_func=="mae":
             criterion=torch.nn.L1Loss()
         else:
+            print ("This is SmoothL1")
             criterion=torch.nn.SmoothL1Loss(reduction='mean', beta=self.beta)
         
         
@@ -73,9 +75,12 @@ class LightningModel(pl.LightningModule):
             print ("Loss: {}".format(loss)) 
 
         else:
+            #For mass conservation
             Lc=(pred[:,0]*self.updates_std[0])+self.updates_mean[0]
             Lr=(pred[:,2]*self.updates_std[2])+self.updates_mean[2]
             mass_cons= criterion(Lc,(-Lr))
+
+            #For moments
             if self.loss_absolute==True:
 
                 real_pred=torch.empty((pred.shape), dtype=torch.float32, device = 'cuda')
@@ -102,13 +107,9 @@ class LightningModel(pl.LightningModule):
             elif self.loss_absolute==False:
                 pred_loss= criterion(updates,pred)
                 
-            L1_reg = torch.tensor(0., requires_grad=True)
-            if self.use_regularizer==True:
-                for name, param in self.model.named_parameters():
-                    if 'weight' in name:
-                        L1_reg = L1_reg + torch.norm(param, 1)
+            
                         
-            loss= pred_loss + mass_cons + 10e-4 * L1_reg
+            loss = loss + pred_loss + mass_cons 
         
         #loss= criterion(updates,preds)
         return loss
@@ -123,38 +124,50 @@ class LightningModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x,updates,rates,y = batch
-        loss=0.0
+        #loss = self.compute_loss(batch)
         
+        
+        loss= torch.tensor([[0]],dtype=torch.float32,device='cuda',requires_grad=True)
+        
+        j=0
+        print ("A new batch starts here:")
         for k in range (0,self.step_size*4,4):
-            
+            print (loss)
             #self.forward(x,updates,rates,y)
             
             logits = self.forward(x.float())
+            l_prev = loss
+            loss = self.loss_function(logits.float(), updates[:,k:k+4].float(),x.float(),y[:,k:k+4].float(),loss)
             
-            loss += self.loss_function(logits.float(), updates[:,k:k+4].float(),x.float(),y[:,k:k+4].float())
-            x=(self.calc_new_x(x,logits,y[:,k:k+4].float())).float()
-           
-            
+            #loss.requires_grad= True
+            if self.step_size > 1:
+                x=(self.calc_new_x(x,logits,y[:,k:k+4].float())).float()
+            new_str="Train_loss_" + str(j)
+            self.log(new_str, loss-l_prev)
+            j+=1
             
         # Add logging
         self.log("train_loss", loss)
-  
+        
         return loss
 
     
     
     def validation_step(self, batch, batch_idx):
         x,updates,rates,y = batch
-        loss=0.0
+        
+        loss= torch.tensor([[0]],dtype=torch.float32,device='cuda',requires_grad= True)
         
         for k in range (0,int(self.step_size*4),4):
             
             #self.forward(x,updates,rates,y)
             logits = self.forward(x.float())
-            loss += self.loss_function(logits.float(), updates[:,k:k+4].float(),x.float(),y[:,k:k+4].float())
-            x=(self.calc_new_x(x,logits,y[:,k:k+4].float())).float()
+            loss = self.loss_function(logits.float(), updates[:,k:k+4].float(),x.float(),y[:,k:k+4].float(),loss)
+            if self.step_size > 1:
+                x=(self.calc_new_x(x,logits,y[:,k:k+4].float())).float()
            
         self.log("val_loss", loss)
+        
         return loss
 
 
@@ -173,10 +186,12 @@ class LightningModel(pl.LightningModule):
         #un-normalize logits
         real_pred=torch.empty((pred.shape), dtype=torch.float32, device = 'cuda')
         real_x=torch.empty((pred.shape), dtype=torch.float32,device = 'cuda')
+        #real_y=torch.empty((pred.shape), dtype=torch.float32, device = 'cuda')
         
         for i in range (4): # Removing Norm
             real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
             real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
+            #real_y [:,i] = y[:,i] * self.inputs_std[i] + self.inputs_mean[i]
 
         #calc new x
         
@@ -190,11 +205,13 @@ class LightningModel(pl.LightningModule):
             
         #z=torch.full((pred_moment.shape[0],), 1e-14).to('cuda')
         
-        tau=pred_moment[:,2]/(pred_moment[:,2]+pred_moment[:,0])
-        xc = pred_moment[:,0]/  pred_moment[:,1]
+        tau = pred_moment[:,2]/(pred_moment[:,2]+pred_moment[:,0])  #Taking tau and xc from the calculated outputs
+
+        xc = pred_moment[:,0]/ (pred_moment[:,1] + 1e-10)
         
         pred_moment_norm[:,4] = (tau - self.inputs_mean[4]) / self.inputs_std[4]
         pred_moment_norm[:,5] = (xc - self.inputs_mean[5]) / self.inputs_std[5]
-        pred_moment_norm[:,6:]=x[:,6:]
+        
+        pred_moment_norm[:,6:]=x[:,6:]  #Doesn't need to be normalized/un-normalized
         
         return pred_moment_norm
