@@ -48,7 +48,7 @@ class DataModule(pl.LightningDataModule):
         with np.load('/gpfs/work/sharmas/mc-snow-data/big_box.npz') as npz:
             self.arr = np.ma.MaskedArray(**npz)
         self.arr=self.arr.astype(np.float32)
-        self.arr=self.arr[:,:,:self.tot_len+1,:self.sim_num]
+        self.arr=self.arr[:,:,:self.tot_len,:self.sim_num]
         self.holdout()  # For creating a holdout dataset
         self.get_tendency() #For calculating tendencies
         self.get_inputs()   #For calculating inputs, outputs
@@ -73,7 +73,7 @@ class DataModule(pl.LightningDataModule):
         self.output_tend_all=[]
         
         self.length=0
-        for i in range (self.tot_len):
+        for i in range (self.arr.shape[-2]):
             #print(self.arr[0,-4,i,0])
             if self.ic=="small":
                 if ((self.arr[0,-4,i,0]>0.0008) and (self.arr[0,-2,i,0]<1.5)):
@@ -141,7 +141,7 @@ class DataModule(pl.LightningDataModule):
         
         print ("Starting to create inputs")
         
-        for i in range (self.tot_len):
+        for i in range (self.arr.shape[-2]):
             inputs_sim=[]
             meta_sim=[]
             outputs_sim=[]
@@ -279,7 +279,7 @@ class DataModule(pl.LightningDataModule):
                 
         else:
             
-            for i in range (self.tot_len):
+            for i in range (self.arr.shape[-2]):
                 # if i== (self.tot_len-self.test_len):
 
                 #     print ("Testing Dataset starts here")
