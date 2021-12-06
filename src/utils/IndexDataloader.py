@@ -25,7 +25,7 @@ class my_dataset(Dataset):
 
         for i in range (self.step_size):
             self.tend_new[:,i] = self.tend[tuple(self.index_arr[index+i])]
-            self.out_new[:,i] = self.out[tuple(self.index_arr[index+i])]
+            self.out_new[:,i] = self.outputs[tuple(self.index_arr[index+i])]
             
         return self.inputdata[tuple(self.index_arr[index])], self.tend_new, self.out_new
     
@@ -66,7 +66,11 @@ class DataModule(pl.LightningDataModule):
         else:
             raise ValueError('Function needs to be called for calculating values from raw data!')
 
-
+    def setup(self):
+        self.calc_index_array()
+        self.calc_norm()
+        self.test_train()
+        
     def calc_index_array_size(self):
         l_in=0
         for i in range (self.tot_len):
@@ -116,8 +120,8 @@ class DataModule(pl.LightningDataModule):
 
             # Creating data indices for training and validation splits:
          
-            train_size = int(0.9 * self.inputs.shape[0])
-            val_size = self.inputs.shape[0] - train_size
+            train_size = int(0.9 * self.dataset.__len__())
+            val_size = self.dataset.__len__() - train_size
 
             self.train_dataset, self.val_dataset = torch.utils.data.random_split(self.dataset, [train_size, val_size])
 
