@@ -8,14 +8,15 @@ from torch.utils.data import Dataset, DataLoader
 
 
 class my_dataset(Dataset):
-    def __init__(self,inputdata,tend,outputs,index_arr,step_size):
+    def __init__(self,inputdata,tend,outputs,index_arr,step_size,moment_scheme):
         self.inputdata=inputdata
         self.tend=tend
         self.outputs=outputs
         self.index_arr=index_arr
         self.step_size=step_size
-        self.tend_new=np.empty((4,self.step_size))
-        self.out_new=np.empty((4,self.step_size))
+        self.moment_scheme=moment_scheme
+        self.tend_new=np.empty((self.moment_scheme*2,self.step_size))
+        self.out_new=np.empty((self.moment_scheme*2,self.step_size))
 
     def __getitem__(self,index):
 
@@ -112,7 +113,7 @@ class DataModule(pl.LightningDataModule):
         
     def test_train(self):
             self.calc_norm()
-            self.dataset=my_dataset(self.inputs_arr,self.tend_arr,self.outputs_arr,self.indices_arr,self.step_size)
+            self.dataset=my_dataset(self.inputs_arr,self.tend_arr,self.outputs_arr,self.indices_arr,self.step_size,self.moment_scheme)
            
 
             # Creating data indices for training and validation splits:
