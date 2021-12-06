@@ -9,9 +9,9 @@ from torch.utils.data import Dataset, DataLoader
 
 class my_dataset(Dataset):
     def __init__(self,inputdata,tend,outputs,index_arr,step_size,moment_scheme):
-        self.inputdata=inputdata
-        self.tend=tend
-        self.outputs=outputs
+        self.inputdata=inputdata.data
+        self.tend=tend.data
+        self.outputs=outputs.data
         self.index_arr=index_arr
         self.step_size=step_size
         self.moment_scheme=moment_scheme
