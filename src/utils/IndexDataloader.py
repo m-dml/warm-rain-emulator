@@ -5,10 +5,6 @@ import pytorch_lightning as pl
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from src.utils import AvgplDataloader
-
-
 
 
 class my_dataset(Dataset):
@@ -38,7 +34,7 @@ class DataModule(pl.LightningDataModule):
 
     def __init__(self, data_dir= "/gpfs/work/sharmas/mc-snow-data/", 
                 batch_size: int = 256, num_workers: int = 1, transform=None,tot_len=719,
-                 sim_num=98,load_from_memory=True, norm="Standard_norm",
+                 sim_num=98,load_from_memory=True, norm="Standard_norm",moment_scheme=2,
                  step_size=1):
         super().__init__()
 
@@ -46,6 +42,7 @@ class DataModule(pl.LightningDataModule):
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.moment_scheme = moment_scheme
         self.tot_len=tot_len
         self.sim_num=sim_num
         self.normalize=norm
@@ -109,9 +106,9 @@ class DataModule(pl.LightningDataModule):
         self.outputs_std = np.std((np.std(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
         self.outputs_arr = (self.outputs_arr - self.outputs_mean) / self.outputs_std
 
-        self.tend_mean = np.mean((np.mean(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
-        self.tend_std = np.std((np.std(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
-        self.tend_arr = (self.tend_arr - self.tend_mean) / self.tend_std
+        self.updates_mean = np.mean((np.mean(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.updates_std = np.std((np.std(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.tend_arr = (self.tend_arr - self.updates_mean) / self.updates_std
         
     def test_train(self):
             self.calc_norm()
