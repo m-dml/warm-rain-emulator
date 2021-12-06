@@ -51,9 +51,22 @@ class LightningModel(pl.LightningModule):
         
     def forward(self, x):
         predictions=self.model(x)
+        predictions = predictions.float()
+        #un-normalize logits
+        self.real_pred=torch.empty((predictions.shape), dtype=torch.float32, device = 'cuda')
         
-        return predictions
        
+        
+        for i in range (4): # Removing Norm
+            self.real_pred[:,i] = (predictions[:,i] * self.updates_std[i]) + self.updates_mean[i]
+        
+       
+        self.real_pred[:,0] = torch.where(self.real_pred[:,0] < 0, self.real_pred[:,0], torch.tensor([0.]).to(device='cuda'))
+        self.real_pred[:,1] = torch.where(self.real_pred[:,1] < 0, self.real_pred[:,1],torch.tensor([0.]).to(device='cuda'))
+        self.real_pred[:,2] = torch.where(self.real_pred[:,2] > 0, self.real_pred[:,2], torch.tensor([0.]).to(device='cuda'))
+
+        predictions = (self.real_pred - torch.from_numpy(self.updates_mean).to(device='cuda')) / torch.from_numpy(self.updates_std).to(device='cuda')
+        return predictions
     
     def loss_function(self,pred,updates,x,y):
         if self.loss_func=="mse":
@@ -77,6 +90,7 @@ class LightningModel(pl.LightningModule):
         else:
             
             mass_cons = 0
+            
 
         #For moments
         if self.loss_absolute==True:
@@ -133,13 +147,13 @@ class LightningModel(pl.LightningModule):
             
             if self.step_size > 1:
                 x=(self.calc_new_x(x,pred,y[:,:,k].float())).float()
-            new_str="Train_loss_" + str(j)
-            self.log(new_str, loss[j])
+            new_str="Train_loss_" + str(k)
+            self.log(new_str, loss[k])
            
         with torch.enable_grad():
             loss_tot = loss.sum().reshape(1,1)
        
-        print ("Calculated train loss")
+    
         self.log("train_loss", loss_tot)
         
         return loss_tot
@@ -163,7 +177,7 @@ class LightningModel(pl.LightningModule):
         
         
         loss_tot = loss.sum().reshape(1,-1) 
-        print ("Calculated val loss")  
+         
         self.log("val_loss", loss_tot)
         
         return loss_tot
