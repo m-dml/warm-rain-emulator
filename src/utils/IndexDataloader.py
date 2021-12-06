@@ -115,7 +115,7 @@ class DataModule(pl.LightningDataModule):
         
     def test_train(self):
             self.calc_norm()
-            self.dataset=my_dataset(self.inputs_arr,self.tend_arr,self.outputs_arr,self.step_size)
+            self.dataset=my_dataset(self.inputs_arr,self.tend_arr,self.outputs_arr,self.indices_arr,self.step_size)
            
 
             # Creating data indices for training and validation splits:
