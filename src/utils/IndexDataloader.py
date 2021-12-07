@@ -55,13 +55,13 @@ class DataModule(pl.LightningDataModule):
             """
      
             
-            with np.load('inputs_all.npz') as npz:
+            with np.load(data_dir+'/inputs_all.npz') as npz:
                 self.inputs_arr=np.ma.MaskedArray(**npz)
 
-            with np.load('outputs_all.npz') as npz:
+            with np.load(data_dir+'/outputs_all.npz') as npz:
                 self.outputs_arr=np.ma.MaskedArray(**npz)
 
-            with np.load('tendencies.npz') as npz:
+            with np.load(data_dir+'/tendencies.npz') as npz:
                 self.tend_arr=np.ma.MaskedArray(**npz)
         else:
             raise ValueError('Function needs to be called for calculating values from raw data!')
