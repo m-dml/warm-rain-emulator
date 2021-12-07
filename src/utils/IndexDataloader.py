@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-
+from src.helpers.normalizer import give_norm
 
 class my_dataset(Dataset):
     def __init__(self,inputdata,tend,outputs,index_arr,step_size,moment_scheme):
@@ -35,7 +35,7 @@ class DataModule(pl.LightningDataModule):
 
     def __init__(self, data_dir= "/gpfs/work/sharmas/mc-snow-data/", 
                 batch_size: int = 256, num_workers: int = 1, transform=None,tot_len=719,
-                 sim_num=98,load_from_memory=True, norm="Standard_norm",moment_scheme=2,
+                 sim_num=98,load_from_memory=True,moment_scheme=2,
                  step_size=1):
         super().__init__()
 
@@ -46,12 +46,14 @@ class DataModule(pl.LightningDataModule):
         self.moment_scheme = moment_scheme
         self.tot_len=tot_len
         self.sim_num=sim_num
-        self.normalize=norm
         self.step_size=step_size
         self.load_from_memory =load_from_memory
         if self.load_from_memory==True:
-            #All the array are of the shape: 
-            #(Time,initial_cond (tot 819),no of sims run,[inputs/outputs/updates])
+            """ 
+            All the array are of the shape: 
+            (Time,initial_cond (tot 819),no of sims run,[inputs/outputs/updates])
+            """
+     
             
             with np.load('inputs_all.npz') as npz:
                 self.inputs_arr=np.ma.MaskedArray(**npz)
@@ -70,6 +72,7 @@ class DataModule(pl.LightningDataModule):
         self.test_train()
         
     def calc_index_array_size(self):
+        """Gives the total length of index array depending on the time length of the simulations"""
         l_in=0
         for i in range (self.tot_len):
             l=np.ma.compress_rows(self.tend_arr[:,i,0,:]).shape[0]-self.step_size+1  #put stepping here
@@ -77,6 +80,7 @@ class DataModule(pl.LightningDataModule):
         return l_in
         
     def calc_index_array(self):
+        """Create an array of indices such that col1, col2,col3: Time,ic_sim,sim_no"""
         l_in = self.calc_index_array_size()
         self.indices_arr = np.empty((l_in*self.sim_num,3),dtype=np.int)  #(98*np.sum(time))
  
@@ -98,18 +102,22 @@ class DataModule(pl.LightningDataModule):
             lo+=indices_sim.shape[0]
 
     def calc_norm (self):
-        self.inputs_mean = np.mean((np.mean(self.inputs_arr.data[:,:,0,:],axis=0)),axis=0)
-        self.inputs_std = np.std((np.std(self.inputs_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.inputs_arr,self.inputs_mean,self.inputs_std = give_norm(self.inputs_arr)
+        self.outputs_arr, self.outputs_mean,self.outputs_std = give_norm(self.outputs_arr)
+        self.tend_arr,self.tend_mean,self.tend_std = give_norm(self.tend_arr)
+        
+        # self.inputs_mean = np.mean((np.mean(self.inputs_arr.data[:,:,0,:],axis=0)),axis=0)
+        # self.inputs_std = np.std((np.std(self.inputs_arr.data[:,:,0,:],axis=0)),axis=0)
 
-        self.inputs_arr = (self.inputs_arr - self.inputs_mean) / self.inputs_std
+        # self.inputs_arr = (self.inputs_arr - self.inputs_mean) / self.inputs_std
+       
+        # self.outputs_mean = np.mean((np.mean(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
+        # self.outputs_std = np.std((np.std(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
+        # self.outputs_arr = (self.outputs_arr - self.outputs_mean) / self.outputs_std
 
-        self.outputs_mean = np.mean((np.mean(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
-        self.outputs_std = np.std((np.std(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
-        self.outputs_arr = (self.outputs_arr - self.outputs_mean) / self.outputs_std
-
-        self.updates_mean = np.mean((np.mean(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
-        self.updates_std = np.std((np.std(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
-        self.tend_arr = (self.tend_arr - self.updates_mean) / self.updates_std
+        # self.updates_mean = np.mean((np.mean(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
+        # self.updates_std = np.std((np.std(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
+        # self.tend_arr = (self.tend_arr - self.updates_mean) / self.updates_std
         
     def test_train(self):
             
