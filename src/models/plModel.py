@@ -8,25 +8,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from src.models.nnmodel import plNetwork
-from src.helpers.normalizer import give_norm, remove_norm
+
 
 
 class LightningModel(pl.LightningModule):    
 
     def __init__(self,updates_mean,updates_std,batch_size=256,beta=0.35,
                  learning_rate=2e-4,act=nn.ReLU(),loss_func=None, n_layers=5,ns=200,out_features=4,
-                 depth=9,p=0.25, norm="Standard_Norm",inputs_mean=None,inputs_std=None,
-                 use_regularizer=False,multi_step=False,step_size=1,loss_absolute=False,mass_cons_loss=False):
+                 depth=9,p=0.25,inputs_mean=None,inputs_std=None,
+                 mass_cons_loss=False,loss_absolute=False,multi_step=False,step_size=1):
         super().__init__()
         #self.automatic_optimization = False
         self.lr=learning_rate
         self.loss_func = loss_func
         self.beta=beta
         self.batch_size=batch_size
-        self.norm=norm
-       
-        self.use_regularizer=use_regularizer
-        self.model=self.initialization_model(act,n_layers,ns,out_features,depth,p)
+        
+        
+        
         self.loss_absolute=loss_absolute
         self.mass_cons_loss = mass_cons_loss
         self.multi_step=multi_step
@@ -40,7 +39,7 @@ class LightningModel(pl.LightningModule):
         self.inputs_std=inputs_std
         self.predictions_pred = None
         self.predictions_actual=None
-        
+        self.model=self.initialization_model(act,n_layers,ns,out_features,depth,p)
     @staticmethod
     def initialization_model(act,n_layers,ns,out_features,depth,p):
         
@@ -56,15 +55,15 @@ class LightningModel(pl.LightningModule):
             self.real_pred=torch.empty((predictions.shape), dtype=torch.float32, device = 'cuda')
             
             for i in range (4): # Removing Norm
-                self.real_pred[:,i] = remove_norm(self.predictions[:,i],self.updates_mean[:,i],self.updates_std[:,i])
+                self.real_pred[:,i] = predictions[:,i] * self.updates_std[i] + self.updates_mean[i]
             
             """Checking the predicted values"""
             self.real_pred[:,0] = torch.where(self.real_pred[:,0] < 0, self.real_pred[:,0], torch.tensor([0.]).to(device='cuda'))
             self.real_pred[:,1] = torch.where(self.real_pred[:,1] < 0, self.real_pred[:,1],torch.tensor([0.]).to(device='cuda'))
             self.real_pred[:,2] = torch.where(self.real_pred[:,2] > 0, self.real_pred[:,2], torch.tensor([0.]).to(device='cuda'))
 
-            #predictions = (self.real_pred - torch.from_numpy(self.updates_mean).to(device='cuda')) / torch.from_numpy(self.updates_std).to(device='cuda')
-            predictions = give_norm(arr=self.real_pred,means=self.updates_mean.to(device='cuda'),stds=self.updates_std.to(device='cuda'))
+            predictions = (self.real_pred - torch.from_numpy(self.updates_mean).to(device='cuda')) / torch.from_numpy(self.updates_std).to(device='cuda')
+            #predictions = give_norm(self.real_pred,torch.from_numpy(self.updates_mean).to(device='cuda'),torch.from_numpy(self.updates_std).to(device='cuda'))
         return predictions
     
     def loss_function(self,pred,updates,x,y):
@@ -99,17 +98,20 @@ class LightningModel(pl.LightningModule):
             real_y=torch.empty((y.shape), dtype=torch.float32,device = 'cuda')
             
             for i in range (4): # Removing Norm
-                real_pred[:,i] = remove_norm(pred[:,i],self.updates_mean[:,i],self.updates_std[:,i])
-                #real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
-                real_x[:,i] = remove_norm(x[:,i],self.inputs_mean[:,i],self.inputs_std[:,i])
-                #real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
-                real_y[:,i] = remove_norm(y[:,i],self.inputs_mean[i],self.inputs_std[i])
+
+                
+                real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
+                real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
+                real_y[:,i] = y[:,i] * self.inputs_std[i] + self.inputs_mean[i]
                 
             pred_moment = real_x + real_pred*20
-            #pred_moment_norm = torch.empty((y.shape), dtype=torch.float32,device = 'cuda')
+            pred_moment_norm = torch.empty((y.shape), dtype=torch.float32,device = 'cuda')
 
-              
-            pred_loss= criterion(pred_moment,real_y) 
+            for i in range (4):
+                pred_moment_norm[:,i] = (pred_moment[:,i] - self.inputs_mean[i]) / self.inputs_std[i]
+                #pred_moment_norm[:,i] = give_norm(pred_moment[:,i],self.inputs_mean[i], self.inputs_std[i])
+
+            pred_loss= criterion(pred_moment_norm,y) 
                  
         elif self.loss_absolute==False:
             pred_loss= criterion(updates,pred)
@@ -199,10 +201,10 @@ class LightningModel(pl.LightningModule):
        
         
         for i in range (4): # Removing Norm
-            real_pred[:,i] = remove_norm(pred[:,i],self.updates_mean[:,i],self.updates_std[:,i])
-            real_x[:,i] = remove_norm(x[:,i],self.inputs_mean[:,i],self.inputs_std[:,i])
-            #real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
-            #real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
+            #real_pred[:,i] = remove_norm(pred[:,i],self.updates_mean[i],self.updates_std[i])
+            #real_x[:,i] = remove_norm(x[:,i],self.inputs_mean[i],self.inputs_std[i])
+            real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
+            real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
            
 
         #calc new x

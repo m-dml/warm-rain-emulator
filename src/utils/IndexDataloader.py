@@ -51,7 +51,7 @@ class DataModule(pl.LightningDataModule):
         if self.load_from_memory==True:
             """ 
             All the array are of the shape: 
-            (Time,initial_cond (tot 819),no of sims run,[inputs/outputs/updates])
+            (Time,initial_cond (tot 819),no of sim runs,[inputs/outputs/updates])
             """
      
             
@@ -102,22 +102,18 @@ class DataModule(pl.LightningDataModule):
             lo+=indices_sim.shape[0]
 
     def calc_norm (self):
-        self.inputs_arr,self.inputs_mean,self.inputs_std = give_norm(self.inputs_arr)
-        self.outputs_arr, self.outputs_mean,self.outputs_std = give_norm(self.outputs_arr)
-        self.tend_arr,self.tend_mean,self.tend_std = give_norm(self.tend_arr)
-        
-        # self.inputs_mean = np.mean((np.mean(self.inputs_arr.data[:,:,0,:],axis=0)),axis=0)
-        # self.inputs_std = np.std((np.std(self.inputs_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.inputs_mean = np.mean((np.mean(self.inputs_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.inputs_std = np.std((np.std(self.inputs_arr.data[:,:,0,:],axis=0)),axis=0)
 
-        # self.inputs_arr = (self.inputs_arr - self.inputs_mean) / self.inputs_std
+        self.inputs_arr = (self.inputs_arr - self.inputs_mean) / self.inputs_std
        
-        # self.outputs_mean = np.mean((np.mean(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
-        # self.outputs_std = np.std((np.std(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
-        # self.outputs_arr = (self.outputs_arr - self.outputs_mean) / self.outputs_std
+        self.outputs_mean = np.mean((np.mean(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.outputs_std = np.std((np.std(self.outputs_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.outputs_arr = (self.outputs_arr - self.outputs_mean) / self.outputs_std
 
-        # self.updates_mean = np.mean((np.mean(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
-        # self.updates_std = np.std((np.std(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
-        # self.tend_arr = (self.tend_arr - self.updates_mean) / self.updates_std
+        self.updates_mean = np.mean((np.mean(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.updates_std = np.std((np.std(self.tend_arr.data[:,:,0,:],axis=0)),axis=0)
+        self.tend_arr = (self.tend_arr - self.updates_mean) / self.updates_std
         
     def test_train(self):
             
@@ -134,8 +130,6 @@ class DataModule(pl.LightningDataModule):
             print("Train Test Val Split Done")
 
     
-  
-        
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.num_workers,
                           shuffle=True)

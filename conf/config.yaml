@@ -1,14 +1,13 @@
-tot_len: 819
-test_len: 10
-sim_num: 98
-input_type: null
+tot_len: 719
 
+sim_num: 98
+moment_scheme: 2
 batch_size: 256 
 beta: 0.35
 learning_rate: 2e-4
 
 act: torch.nn.ReLU()
-loss_function: null
+loss_func: null
 
 n_layers: 5
 ns: 200
@@ -18,9 +17,9 @@ p: 0.25
 norm: Standard_Norm
 inputs_mean: null
 inputs_std: null
-ic: All
-use_regularizer: False
+loss_absolute: True
+mass_cons_loss: True
 multi_step: True
 step_size: 2
-loss_absolute: False
-max_epochs: 100
+
+max_epochs: 1
