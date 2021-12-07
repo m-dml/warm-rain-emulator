@@ -112,7 +112,7 @@ class DataModule(pl.LightningDataModule):
         self.tend_arr = (self.tend_arr - self.updates_mean) / self.updates_std
         
     def test_train(self):
-            self.calc_norm()
+            
             self.dataset=my_dataset(self.inputs_arr,self.tend_arr,self.outputs_arr,self.indices_arr,self.step_size,self.moment_scheme)
            
 
