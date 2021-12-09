@@ -132,8 +132,7 @@ class DataModule(pl.LightningDataModule):
     def calc_norm(self):
         self.inputs_arr, self.inputs_mean, self.inputs_std = normalize_data(self.inputs_arr)
         self.outputs_arr, self.outputs_mean, self.outputs_std = normalize_data(self.outputs_arr)
-        self.updates_arr, self.updates_mean, self.updates_std = normalize_data(self.updates_arr)
-        self.tend_arr = (self.tend_arr - self.updates_mean) / self.updates_std
+        self.tend_arr, self.updates_mean, self.updates_std = normalize_data(self.tend_arr)
 
     def test_train(self):
 
