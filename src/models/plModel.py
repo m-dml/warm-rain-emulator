@@ -8,12 +8,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from src.models.nnmodel import plNetwork
-
+from matplotlib import pyplot as plt
 
 
 class LightningModel(pl.LightningModule):    
 
-    def __init__(self,updates_mean,updates_std,batch_size=256,beta=0.35,
+    def __init__(self, updates_mean,updates_std,data_dir= "/gpfs/work/sharmas/mc-snow-data/",batch_size=256,beta=0.35,
                  learning_rate=2e-4,act=nn.ReLU(),loss_func=None, n_layers=5,ns=200,out_features=4,
                  depth=9,p=0.25,inputs_mean=None,inputs_std=None,
                  mass_cons_loss=False,loss_absolute=False,multi_step=False,step_size=1):
@@ -42,7 +42,7 @@ class LightningModel(pl.LightningModule):
         self.model=self.initialization_model(act,n_layers,ns,out_features,depth,p)
     @staticmethod
     def initialization_model(act,n_layers,ns,out_features,depth,p):
-        
+        os.chdir ('/gpfs/work/sharmas/mc-snow-data/')
         model=plNetwork(act,n_layers,ns,out_features,depth,p)
         model.train()
         return model
@@ -152,7 +152,8 @@ class LightningModel(pl.LightningModule):
                 x=(self.calc_new_x(x,pred,y[:,:,k].float())).float()
             new_str="Train_loss_" + str(k)
             self.log(new_str, loss[k])
-           
+       
+        
         with torch.enable_grad():
             loss_tot = loss.sum().reshape(1,1)
        
@@ -176,8 +177,8 @@ class LightningModel(pl.LightningModule):
                 x=(self.calc_new_x(x,pred,y[:,:,k].float())).float()
 
         
-        
-        loss_tot = loss.sum().reshape(1,-1) 
+        with torch.enable_grad():
+            loss_tot = loss.sum().reshape(1,-1) 
         self.log("val_loss", loss_tot)
         
         return loss_tot
@@ -225,4 +226,27 @@ class LightningModel(pl.LightningModule):
         
         pred_moment_norm[:,6:]=x[:,6:]  #Doesn't need to be normalized/un-normalized
         
+         #Add plotting here
+        fig,figname = self.plot_preds(x=real_x[:,:4],x_pred = pred_moment)
+        self.logger.experiment.add_figure(figname, fig, self.global_step)
         return pred_moment_norm
+    
+    def plot_preds(self,x,x_pred):
+        x=x.cpu().detach().numpy()
+        y=x_pred.cpu().detach().numpy()
+        var=["Lc","Nc","Lr","Nr"]
+        c=["#26235b","#bc473a","#812878","#f69824"]
+        fig = plt.figure(figsize=(15, 12))
+
+        for i in range (4):
+            ax = fig.add_subplot(2,2, i + 1)
+            plt.scatter(x,y,color=c[i])
+
+            plt.title(var[i])
+            plt.ylabel("Neural Network Predictions")
+            plt.xlabel("Real Value")
+            plt.tight_layout()
+
+        figname= "Mc-Snow vs ML"
+        
+        return fig,figname
