@@ -149,7 +149,7 @@ class LightningModel(pl.LightningModule):
             
             
             if self.step_size > 1:
-                x=(self.calc_new_x(x,pred,y[:,:,k].float())).float()
+                x=(self.calc_new_x(x,pred,y[:,:,k].float(),k)).float()
             new_str="Train_loss_" + str(k)
             self.log(new_str, loss[k])
        
@@ -174,7 +174,7 @@ class LightningModel(pl.LightningModule):
                 loss[k,:] = self.loss_function(pred.float(), updates[:,:,k].float(),x.float(),y[:,:,k].float())
           
             if self.step_size > 1:
-                x=(self.calc_new_x(x,pred,y[:,:,k].float())).float()
+                x=(self.calc_new_x(x,pred,y[:,:,k].float(),k)).float()
 
         
         with torch.enable_grad():
@@ -195,7 +195,7 @@ class LightningModel(pl.LightningModule):
         self.predictions_actual.append(y)
         return pred,y
     
-    def calc_new_x(self,x,pred,y): 
+    def calc_new_x(self,x,pred,y,k): 
         #un-normalize logits
         real_pred=torch.empty((pred.shape), dtype=torch.float32, device = 'cuda')
         real_x=torch.empty((pred.shape), dtype=torch.float32,device = 'cuda')
@@ -228,7 +228,8 @@ class LightningModel(pl.LightningModule):
         
          #Add plotting here
         fig,figname = self.plot_preds(x=real_x[:,:4],x_pred = pred_moment)
-        self.logger.experiment.add_figure(figname, fig, self.global_step)
+        self.logger.experiment.add_figure(figname + ": Step  " +str(k), fig, self.global_step)
+        
         return pred_moment_norm
     
     def plot_preds(self,x,x_pred):
@@ -240,7 +241,7 @@ class LightningModel(pl.LightningModule):
 
         for i in range (4):
             ax = fig.add_subplot(2,2, i + 1)
-            plt.scatter(x,y,color=c[i])
+            plt.scatter(x[:,i],y[:,i],color=c[i])
 
             plt.title(var[i])
             plt.ylabel("Neural Network Predictions")
