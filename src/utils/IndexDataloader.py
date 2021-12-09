@@ -16,16 +16,18 @@ class my_dataset(Dataset):
         self.index_arr = index_arr
         self.step_size = step_size
         self.moment_scheme = moment_scheme
-        self.tend_new = np.empty((self.moment_scheme*2, self.step_size))
-        self.out_new = np.empty((self.moment_scheme*2, self.step_size))
+        self.tend_new = np.empty((self.moment_scheme * 2, self.step_size))
+        self.out_new = np.empty((self.moment_scheme * 2, self.step_size))
 
     def __getitem__(self, index):
+        i_time, i_ic, i_repeat = self.index_arr[index]
+        tend_multistep = np.empty((self.moment_scheme * 2, self.step_size))  # tendencies
+        outputs_multistep = np.empty((self.moment_scheme * 2, self.step_size))  # outputs (moments?)
+        for i_step in range(self.step_size):
+            tend_multistep[:, i_step] = self.tend[i_time + i_step, i_ic, i_repeat]
+            outputs_multistep[:, i_step] = self.outputs[i_time + i_step, i_ic, i_repeat]
 
-        for i in range(self.step_size):
-            self.tend_new[:, i] = self.tend[tuple(self.index_arr[index+i])]
-            self.out_new[:, i] = self.outputs[tuple(self.index_arr[index+i])]
-
-        return self.inputdata[tuple(self.index_arr[index])], self.tend_new, self.out_new
+        return self.inputdata[i_time, i_ic, i_repeat], tend_multistep, outputs_multistep
 
     def __len__(self):
         return self.index_arr.shape[0]
