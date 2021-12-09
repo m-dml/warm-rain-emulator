@@ -37,9 +37,9 @@ def normalize_data(x):
     """
     normalize array by all but the last dimension, return normed vals, means, sds
     """
-    x = x.reshape(-1, x.shape[-1])
-    m = x.mean(axis=0)
-    s = x.std(axis=0)
+    x_ = x.reshape(-1, x.shape[-1])
+    m = x_.mean(axis=0)
+    s = x_.std(axis=0)
     return (x - m) / s, m, s
 
 
