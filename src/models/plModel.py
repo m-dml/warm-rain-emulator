@@ -227,8 +227,9 @@ class LightningModel(pl.LightningModule):
         pred_moment_norm[:,6:]=x[:,6:]  #Doesn't need to be normalized/un-normalized
         
          #Add plotting here
-        fig,figname = self.plot_preds(x=real_x[:,:4],x_pred = pred_moment)
-        self.logger.experiment.add_figure(figname + ": Step  " +str(k), fig, self.global_step)
+        if (self.global_step % 2000) == 0:
+            fig,figname = self.plot_preds(x=real_x[:,:4],x_pred = pred_moment)
+            self.logger.experiment.add_figure(figname + ": Step  " +str(k), fig, self.global_step)
         
         return pred_moment_norm
     
