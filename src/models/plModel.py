@@ -14,11 +14,13 @@ from matplotlib import pyplot as plt
 class LightningModel(pl.LightningModule):    
 
     def __init__(self, updates_mean,updates_std,data_dir= "/gpfs/work/sharmas/mc-snow-data/",batch_size=256,beta=0.35,
-                 learning_rate=2e-4,act=nn.ReLU(),loss_func=None, n_layers=5,ns=200,out_features=4,
+                 learning_rate=2e-4,act=nn.ReLU(),loss_func=None, n_layers=5,ns=200,
                  depth=9,p=0.25,inputs_mean=None,inputs_std=None,
-                 mass_cons_loss=False,loss_absolute=False,multi_step=False,step_size=1):
+                 mass_cons_loss=False,loss_absolute=False,multi_step=False,step_size=1,moment_scheme=2):
         super().__init__()
         #self.automatic_optimization = False
+        self.moment_scheme= moment_scheme
+        self.out_features = moment_scheme * 2
         self.lr=learning_rate
         self.loss_func = loss_func
         self.beta=beta
@@ -32,37 +34,44 @@ class LightningModel(pl.LightningModule):
         self.step_size=step_size
         self.num_workers=48
         self.save_hyperparameters() 
+
+        self.loss= torch.empty((self.step_size,1),dtype=torch.float32,device=self.device,requires_grad=True)
         
-        self.updates_std=updates_std
-        self.updates_mean=updates_mean
-        self.inputs_mean=inputs_mean
-        self.inputs_std=inputs_std
+        self.updates_std=torch.from_numpy(updates_std).float().to('cuda')
+        self.updates_mean=torch.from_numpy(updates_mean).float().to('cuda')
+        self.inputs_mean=torch.from_numpy(inputs_mean).float().to('cuda')
+        self.inputs_std=torch.from_numpy(inputs_std).float().to('cuda')
         self.predictions_pred = None
         self.predictions_actual=None
-        self.model=self.initialization_model(act,n_layers,ns,out_features,depth,p)
+
+        
+        self.model=self.initialization_model(act,n_layers,ns,self.out_features,depth,p)
+       
+        
     @staticmethod
     def initialization_model(act,n_layers,ns,out_features,depth,p):
         os.chdir ('/gpfs/work/sharmas/mc-snow-data/')
         model=plNetwork(act,n_layers,ns,out_features,depth,p)
         model.train()
+        
         return model
         
     def forward(self, x):
         predictions=self.model(x)
-        predictions = predictions.float()
+        self.predictions = predictions.float()
+       
         #un-normalize logits
         if self.mass_cons_loss == False:
-            self.real_pred=torch.empty((predictions.shape), dtype=torch.float32, device = 'cuda')
             
-            for i in range (4): # Removing Norm
-                self.real_pred[:,i] = predictions[:,i] * self.updates_std[i] + self.updates_mean[i]
+            
+            self.real_pred = self.predictions * self.updates_std + self.updates_mean
             
             """Checking the predicted values"""
             self.real_pred[:,0] = torch.where(self.real_pred[:,0] < 0, self.real_pred[:,0], torch.tensor([0.]).to(device='cuda'))
             self.real_pred[:,1] = torch.where(self.real_pred[:,1] < 0, self.real_pred[:,1],torch.tensor([0.]).to(device='cuda'))
             self.real_pred[:,2] = torch.where(self.real_pred[:,2] > 0, self.real_pred[:,2], torch.tensor([0.]).to(device='cuda'))
 
-            predictions = (self.real_pred - torch.from_numpy(self.updates_mean).to(device='cuda')) / torch.from_numpy(self.updates_std).to(device='cuda')
+            predictions = (self.real_pred - self.updates_mean) / self.updates_std
             #predictions = give_norm(self.real_pred,torch.from_numpy(self.updates_mean).to(device='cuda'),torch.from_numpy(self.updates_std).to(device='cuda'))
         return predictions
     
@@ -72,54 +81,40 @@ class LightningModel(pl.LightningModule):
         elif self.loss_func=="mae":
             criterion=torch.nn.L1Loss()
         else:
-           
-            criterion=torch.nn.SmoothL1Loss(reduction='mean', beta=self.beta)
+           criterion=torch.nn.SmoothL1Loss(reduction='mean', beta=self.beta)
         
         
         #For mass conservation
         if self.mass_cons_loss == True: 
             
             Lc=(pred[:,0]*self.updates_std[0])+self.updates_mean[0]
-            
             Lr=(pred[:,2]*self.updates_std[2])+self.updates_mean[2]
             mass_cons= criterion(Lc,(-Lr))
           
             
         else:
-            
             mass_cons = 0
             
 
         #For moments
         if self.loss_absolute==True:
+         # Removing Norm
 
-            real_pred=torch.empty((pred.shape), dtype=torch.float32, device = 'cuda')
-            real_x=torch.empty((pred.shape), dtype=torch.float32,device = 'cuda')
-            real_y=torch.empty((y.shape), dtype=torch.float32,device = 'cuda')
-            
-            for i in range (4): # Removing Norm
-
-                
-                real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
-                real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
-                real_y[:,i] = y[:,i] * self.inputs_std[i] + self.inputs_mean[i]
+            real_pred = pred* self.updates_std + self.updates_mean
+            real_x = x[:,:self.out_features] * self.inputs_std + self.inputs_mean
+            real_y = y * self.inputs_std + self.inputs_mean
                 
             pred_moment = real_x + real_pred*20
-            pred_moment_norm = torch.empty((y.shape), dtype=torch.float32,device = 'cuda')
-
-            for i in range (4):
-                pred_moment_norm[:,i] = (pred_moment[:,i] - self.inputs_mean[i]) / self.inputs_std[i]
-                #pred_moment_norm[:,i] = give_norm(pred_moment[:,i],self.inputs_mean[i], self.inputs_std[i])
+            pred_moment_norm = torch.empty((y.shape), dtype=torch.float32,device = self.device)
+            pred_moment_norm[:,:self.out_features] = (pred_moment - self.inputs_mean[self.out_features]) / self.inputs_std[self.out_features]
+               
 
             pred_loss= criterion(pred_moment_norm,y) 
                  
         elif self.loss_absolute==False:
             pred_loss= criterion(updates,pred)
-                
             
-                        
         loss_net= pred_loss + mass_cons 
-        
         
         return loss_net
         
@@ -132,30 +127,26 @@ class LightningModel(pl.LightningModule):
 
 
     def training_step(self, batch, batch_idx):
+        
         """Dim x: batch, inputs (4 moments,xc,tau,3 initial conditions)
            Dim updates, y: batch, moments,step size"""
            
         x,updates,y = batch
-        loss= torch.empty((self.step_size,1),dtype=torch.float32,device='cuda',requires_grad=True)
-        
-    
-        
         for k in range (self.step_size):
             
             pred = self.forward(x.float())
-           
             with torch.no_grad():
-                loss [k,:] = self.loss_function(pred.float(), updates[:,:,k].float(),x.float(),y[:,:,k].float())
+                self.loss [k,:] = self.loss_function(pred.float(), updates[:,:,k].float(),x.float(),y[:,:,k].float())
             
             
             if self.step_size > 1:
                 x=(self.calc_new_x(x,pred,y[:,:,k].float(),k)).float()
             new_str="Train_loss_" + str(k)
-            self.log(new_str, loss[k])
+            self.log(new_str, self.loss[k])
        
         
-        with torch.enable_grad():
-            loss_tot = loss.sum().reshape(1,1)
+       
+        loss_tot = self.loss.sum().reshape(1,1)
        
     
         self.log("train_loss", loss_tot)
@@ -166,19 +157,18 @@ class LightningModel(pl.LightningModule):
     
     def validation_step(self, batch, batch_idx):
         x,updates,y = batch
-        loss= torch.empty((self.step_size,1),dtype=torch.float32,device='cuda',requires_grad=True)
-       
+        
         for k in range (self.step_size):
             pred = self.forward(x.float())
             with torch.no_grad():
-                loss[k,:] = self.loss_function(pred.float(), updates[:,:,k].float(),x.float(),y[:,:,k].float())
+                self.loss[k,:] = self.loss_function(pred.float(), updates[:,:,k].float(),x.float(),y[:,:,k].float())
           
             if self.step_size > 1:
                 x=(self.calc_new_x(x,pred,y[:,:,k].float(),k)).float()
 
         
-        with torch.enable_grad():
-            loss_tot = loss.sum().reshape(1,-1) 
+        
+        loss_tot = self.loss.sum().reshape(1,1) 
         self.log("val_loss", loss_tot)
         
         return loss_tot
@@ -187,9 +177,9 @@ class LightningModel(pl.LightningModule):
 
 
     def test_step(self, batch, batch_idx):
-        x,updates,rates, y = batch
+        x,updates, y = batch
         pred = self.forward(x)
-        loss = self.loss_function(pred, updates,x,y)
+        loss = self.loss_function(pred,updates,x,y)
         
         self.predictions_pred.append(pred)
         self.predictions_actual.append(y)
@@ -197,29 +187,18 @@ class LightningModel(pl.LightningModule):
     
     def calc_new_x(self,x,pred,y,k): 
         #un-normalize logits
-        real_pred=torch.empty((pred.shape), dtype=torch.float32, device = 'cuda')
-        real_x=torch.empty((pred.shape), dtype=torch.float32,device = 'cuda')
-       
-        
-        for i in range (4): # Removing Norm
-            #real_pred[:,i] = remove_norm(pred[:,i],self.updates_mean[i],self.updates_std[i])
-            #real_x[:,i] = remove_norm(x[:,i],self.inputs_mean[i],self.inputs_std[i])
-            real_pred[:,i] = pred[:,i] * self.updates_std[i] + self.updates_mean[i]
-            real_x[:,i] = x[:,i] * self.inputs_std[i] + self.inputs_mean[i]
            
-
+        real_pred = pred * self.updates_std + self.updates_mean
+        real_x = x[:,:self.out_features] * self.inputs_std[:self.out_features] + self.inputs_mean[:self.out_features]
+           
         #calc new x
         pred_moment = real_x + real_pred*20
-        pred_moment_norm = torch.empty((x.shape), dtype=torch.float32,device = 'cuda')
-        
-        #normalize x
-        for i in range (4):
-            pred_moment_norm[:,i] = (pred_moment[:,i] - self.inputs_mean[i]) / self.inputs_std[i]
             
-       
+        pred_moment_norm=torch.empty((x.shape), dtype=torch.float32, device = self.device)
+        pred_moment_norm[:,:self.out_features] = (pred_moment - self.inputs_mean[:self.out_features]) / self.inputs_std[:self.out_features]
         
         tau = pred_moment[:,2]/(pred_moment[:,2]+pred_moment[:,0])  #Taking tau and xc from the calculated outputs
-        xc = pred_moment[:,0]/ (pred_moment[:,1] + 1e-14)
+        xc = pred_moment[:,0]/ (pred_moment[:,1] + 1e-8)
         
         pred_moment_norm[:,4] = (tau - self.inputs_mean[4]) / self.inputs_std[4]
         pred_moment_norm[:,5] = (xc - self.inputs_mean[5]) / self.inputs_std[5]
@@ -228,7 +207,7 @@ class LightningModel(pl.LightningModule):
         
          #Add plotting here
         if (self.global_step % 2000) == 0:
-            fig,figname = self.plot_preds(x=real_x[:,:4],x_pred = pred_moment)
+            fig,figname = self.plot_preds(x=real_x[:,:self.out_features],x_pred = pred_moment)
             self.logger.experiment.add_figure(figname + ": Step  " +str(k), fig, self.global_step)
         
         return pred_moment_norm
