@@ -50,7 +50,7 @@ def cli_main():
                               learning_rate=config.learning_rate,act=eval(config.act), loss_func=config.loss_func,
                               depth=config.depth,p=config.p,n_layers=config.n_layers,ns=config.ns,
                               loss_absolute=config.loss_absolute, mass_cons_loss=config.mass_cons_loss, 
-                              multi_step=config.multi_step,step_size=config.step_size
+                              multi_step=config.multi_step,step_size=config.step_size,moment_scheme=config.moment_scheme
                               ) 
  
     
@@ -58,7 +58,7 @@ def cli_main():
 
     early_stop = EarlyStopping(monitor="val_loss", patience=10, verbose=True)
 
-    trainer = pl.Trainer(callbacks=[checkpoint_callback, early_stop],gpus=GPUS, max_epochs=N_EPOCHS)
+    trainer = pl.Trainer(callbacks=[checkpoint_callback, early_stop],gpus=GPUS, max_epochs=N_EPOCHS,num_sanity_val_steps=0)
 
     trainer.fit(pl_model,data_module)
 
