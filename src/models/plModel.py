@@ -67,12 +67,12 @@ class LightningModel(pl.LightningModule):
             self.real_pred = self.predictions * self.updates_std + self.updates_mean
             
             """Checking the predicted values"""
-            self.real_pred[:,0] = torch.where(self.real_pred[:,0] < 0, self.real_pred[:,0], torch.tensor([0.]).to(device='cuda'))
-            self.real_pred[:,1] = torch.where(self.real_pred[:,1] < 0, self.real_pred[:,1],torch.tensor([0.]).to(device='cuda'))
-            self.real_pred[:,2] = torch.where(self.real_pred[:,2] > 0, self.real_pred[:,2], torch.tensor([0.]).to(device='cuda'))
+            self.real_pred[:,0] = torch.min(self.real_pred[:,0],torch.tensor([0.]).to(self.device))
+            self.real_pred[:,1] = torch.min(self.real_pred[:,1] ,torch.tensor([0.]).to(self.device))
+            self.real_pred[:,2] = torch.max(self.real_pred[:,2] ,torch.tensor([0.]).to(self.device))
 
             predictions = (self.real_pred - self.updates_mean) / self.updates_std
-            #predictions = give_norm(self.real_pred,torch.from_numpy(self.updates_mean).to(device='cuda'),torch.from_numpy(self.updates_std).to(device='cuda'))
+          
         return predictions
     
     def loss_function(self,pred,updates,x,y):
