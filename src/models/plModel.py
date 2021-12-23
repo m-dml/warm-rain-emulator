@@ -9,16 +9,16 @@ import torch.nn.functional as F
 import torch.optim as optim
 from src.models.nnmodel import plNetwork
 from matplotlib import pyplot as plt
-
+import seaborn as sns
 
 class LightningModel(pl.LightningModule):    
 
     def __init__(self, updates_mean,updates_std,data_dir= "/gpfs/work/sharmas/mc-snow-data/",batch_size=256,beta=0.35,
                  learning_rate=2e-4,act=nn.ReLU(),loss_func=None, n_layers=5,ns=200,
                  depth=9,p=0.25,inputs_mean=None,inputs_std=None,
-                 mass_cons_loss_updates=True,loss_absolute=True,mass_cons_loss_moments=True,hard_constraints_updates=True,
-                 hard_constraints_moments=True,
-                 multi_step=False,step_size=1,moment_scheme=2,plot_while_training=True):
+                 mass_cons_loss_updates=False,loss_absolute=True,mass_cons_loss_moments=True,hard_constraints_updates=True,
+                 hard_constraints_moments=False,
+                 multi_step=False,step_size=1,moment_scheme=2,plot_while_training=True,use_batch_norm=False):
         super().__init__()
         #self.automatic_optimization = False
         self.moment_scheme= moment_scheme
@@ -41,7 +41,12 @@ class LightningModel(pl.LightningModule):
 
         if self.hard_constraints_moments == False and self.mass_cons_loss_moments == True:
             print("not using hard constraints on updates while choosing to conserve mass can lead to negative moments")
-
+            
+         #For mass conservation
+        if self.mass_cons_loss_updates: 
+            self.out_features -=1
+            """Subsequent changes to the model to be added"""
+          
         
         self.multi_step=multi_step
         self.step_size=step_size
@@ -59,37 +64,63 @@ class LightningModel(pl.LightningModule):
         self.predictions_actual=None
 
         
-        self.model=self.initialization_model(act,n_layers,ns,self.out_features,depth,p)
+        self.model=self.initialization_model(act,n_layers,ns,self.out_features,depth,p,use_batch_norm)
        
         
     @staticmethod
-    def initialization_model(act,n_layers,ns,out_features,depth,p):
+    def initialization_model(act,n_layers,ns,out_features,depth,p,use_batch_norm):
         os.chdir ('/gpfs/work/sharmas/mc-snow-data/')
-        model=plNetwork(act,n_layers,ns,out_features,depth,p)
+        model=plNetwork(act,n_layers,ns,out_features,depth,p,use_batch_norm)
         model.train()
-        
         return model
         
-    def forward(self, x):
-        predictions=self.model(x)
-        self.predictions = predictions.float()
-       
-        #un-normalize logits
-        if self.hard_constraints_updates == True:
+    def forward(self):
+        updates=self.model(self.x.float())
+        self.updates = updates.float()
+        self.check_values()
+        
+        
+    def check_values(self):
+        
+        self.real_updates = self.updates * self.updates_std + self.updates_mean # Un-normalize
+        if self.hard_constraints_updates:
             
-            
-            real_pred = self.predictions * self.updates_std + self.updates_mean
             
             """Checking the predicted values"""
-            real_pred[:,0] = torch.min(real_pred[:,0],torch.tensor([0.]).to(self.device))
-            real_pred[:,1] = torch.min(real_pred[:,1] ,torch.tensor([0.]).to(self.device))
-            real_pred[:,2] = torch.max(real_pred[:,2] ,torch.tensor([0.]).to(self.device))
+            self.real_updates[:,0] = torch.min(self.real_updates[:,0],torch.tensor([0.]).to(self.device))
+            self.real_updates[:,1] = torch.min(self.real_updates[:,1] ,torch.tensor([0.]).to(self.device))
+            self.real_updates[:,2] = torch.max(self.real_updates[:,2] ,torch.tensor([0.]).to(self.device))
+            #self.real_updates[:,3] = torch.min(self.real_updates[:,3] ,self.real_updates[:,1]/2)
+            self.updates = (self.real_updates - self.updates_mean) / self.updates_std #normalized and stored as updates, to be used for direct comaprison
 
-            predictions = (real_pred - self.updates_mean) / self.updates_std
+            
+
+        self.real_x = self.x[:,:self.out_features] * self.inputs_std[:self.out_features] + self.inputs_mean[:self.out_features] #un-normalize
+        
+        self.pred_moment = self.real_x + self.real_updates*20
+        Lo = self.x[:,-3] *self.inputs_std[-3] +self.inputs_mean[-3] #For total water
+        if self.hard_constraints_moments:
+           
+            """Checking moments"""
+           
+            self.pred_moment[:,0]= torch.max(torch.min(self.pred_moment[:,0], Lo), torch.tensor([0.]).to(self.device))
+            self.pred_moment[:,1] = torch.max(self.pred_moment[:,1] ,torch.tensor([0.]).to(self.device))
+            self.pred_moment[:,2]= torch.max(torch.min(self.pred_moment[:,2], Lo), torch.tensor([0.]).to(self.device))
+            self.pred_moment[:,3] = torch.max(self.pred_moment[:,3] ,torch.tensor([0.]).to(self.device))
+        
           
-        return predictions
-    
-    def loss_function(self,pred,updates,x,y):
+        if self.mass_cons_loss_moments:
+            
+            #Best not to use if hard constraints are not used in moments
+            self.pred_moment[:,0] = Lo - self.pred_moment[:,2]
+        
+        self.pred_moment_norm = torch.empty((self.pred_moment.shape), dtype=torch.float32,device = self.device)
+        self.pred_moment_norm[:,:self.out_features] = (self.pred_moment - self.inputs_mean[:self.out_features]) / self.inputs_std[:self.out_features]
+
+        
+        
+    def loss_function(self,updates,y):
+        
         if self.loss_func=="mse":
             criterion=torch.nn.MSELoss()
         elif self.loss_func=="mae":
@@ -98,54 +129,18 @@ class LightningModel(pl.LightningModule):
             criterion=torch.nn.SmoothL1Loss(reduction='mean', beta=self.beta)
         
         
-        #For mass conservation
-        if self.mass_cons_loss_updates == True: 
-            
-            pred[:,2] = pred[:,0]
-          
-            
-
         #For moments
-        if self.loss_absolute==True:
-         # Removing Norm
+        if self.loss_absolute:
+            pred_loss= criterion(self.pred_moment_norm,y) 
 
-            real_pred = pred* self.updates_std + self.updates_mean
-            real_x = x[:,:self.out_features] * self.inputs_std[:self.out_features] + self.inputs_mean[:self.out_features]
-            real_y = y * self.inputs_std[:self.out_features] + self.inputs_mean[:self.out_features]
-            Lo = x[:,-3] *self.inputs_std[-3] +self.inputs_mean[-3] 
-            
-            pred_moment = real_x + real_pred*20
-            self.prev_m=pred_moment
-            if self.hard_constraints_moments:
-                """Checking moments"""
-                #pred_moment = torch.max(pred_moment,torch.tensor([0.]).to(self.device))
-                pred_moment[:,0] = torch.max(pred_moment[:,0] ,torch.tensor([0.]).to(self.device))
-                pred_moment[:,1] = torch.max(pred_moment[:,1] ,torch.tensor([0.]).to(self.device))
-                pred_moment[:,2] = torch.max(pred_moment[:,2] ,torch.tensor([0.]).to(self.device))
-                pred_moment[:,3] = torch.max(pred_moment[:,3] ,torch.tensor([0.]).to(self.device))
-            self.new_m=pred_moment
-            if self.mass_cons_loss_moments:
-                
-                #Best not to use if hard constraints are not used in moments
-                pred_moment[:,0] = Lo - pred_moment[:,2]
-            self.newer_m=pred_moment
-            pred_moment_norm = torch.empty((y.shape), dtype=torch.float32,device = self.device)
-            pred_moment_norm[:,:self.out_features] = (pred_moment - self.inputs_mean[:self.out_features]) / self.inputs_std[:self.out_features]
-               
-
-            pred_loss= criterion(pred_moment_norm,y) 
-
-            return pred_loss, pred_moment #Returning here so it doesn't need to be calculated again in calc_new_x
+            return pred_loss 
         
         elif self.loss_absolute==False:
-            pred_loss= criterion(updates,pred)
+            pred_loss= criterion(updates,self.updates)
             
             return pred_loss 
         
-        
-        
-        
-
+    
     def configure_optimizers(self):
         optimizer=  torch.optim.Adam(self.parameters(), lr=self.lr)
         
@@ -154,109 +149,123 @@ class LightningModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         
-        """Dim x: batch, inputs (4 moments,xc,tau,3 initial conditions)
+        """Dim self.x: batch, inputs (4 moments,self.xc,tau,3 initial conditions)
            Dim updates, y: batch, moments,step size"""
            
-        x,updates,y = batch
+        self.x,updates,y = batch
         
         for k in range (self.step_size):
             
-            pred = self.forward(x.float())
+            self.forward()
+            assert self.updates is not None
             with torch.no_grad():
-                self.loss [k,:],pred_moment = self.loss_function(pred.float(), updates[:,:,k].float(),x.float(),y[:,:,k].float())
+                self.loss [k,:] = self.loss_function(updates[:,:,k].float(),y[:,:,k].float())
             
             
             if self.step_size > 1:
-                x=(self.calc_new_x(x,pred,y[:,:,k].float(),k,pred_moment)).float()
+                self.calc_new_x(y[:,:,k].float(),k)
             new_str="Train_loss_" + str(k)
             self.log(new_str, self.loss[k])
        
         
        
-        loss_tot = self.loss.sum().reshape(1,1)
+        loss_tot = self.loss.sum().reshape(1,1) 
        
     
         self.log("train_loss", loss_tot)
-        
+        #break point
         return loss_tot
 
     
     
     def validation_step(self, batch, batch_idx):
-        x,updates,y = batch
+        self.x,updates,y = batch
         
         for k in range (self.step_size):
-            pred = self.forward(x.float())
+            self.forward()
+            assert self.updates is not None
             with torch.no_grad():
-                self.loss[k,:],pred_moment = self.loss_function(pred.float(), updates[:,:,k].float(),x.float(),y[:,:,k].float())
+                self.loss[k,:]= self.loss_function(updates[:,:,k].float(),y[:,:,k].float())
           
             if self.step_size > 1:
-                x=(self.calc_new_x(x,pred,y[:,:,k].float(),k,pred_moment)).float()
+                self.calc_new_x(y[:,:,k].float(),k)
 
-        
-        
         loss_tot = self.loss.sum().reshape(1,1) 
         self.log("val_loss", loss_tot)
-        
+        #breakpoint
         return loss_tot
 
 
 
 
     def test_step(self, batch, batch_idx):
-        x,updates, y = batch
-        pred = self.forward(x)
-        loss = self.loss_function(pred,updates,x,y)
+        self.x,updates, y = batch
+        pred = self.forward(self.x)
+        loss = self.loss_function(pred,updates,self.x,y)
         
         self.predictions_pred.append(pred)
         self.predictions_actual.append(y)
         return pred,y
     
-    def calc_new_x(self,x,pred,y,k,pred_moment): 
-        
-        #un-normalize preds
-        real_pred = pred* self.updates_std + self.updates_mean
-        real_x = x[:,:self.out_features] * self.inputs_std[:self.out_features] + self.inputs_mean[:self.out_features]
-        
-        
-        pred_moment = real_x + real_pred *20
-        if self.hard_constraints_moments:
-            """Checking moments"""
-            #pred_moment = torch.max(pred_moment,torch.tensor([0.]).to(self.device))
-            pred_moment[:,0] = torch.max(pred_moment[:,0] ,torch.tensor([0.]).to(self.device))
-            pred_moment[:,1] = torch.max(pred_moment[:,1] ,torch.tensor([0.]).to(self.device))
-            pred_moment[:,2] = torch.max(pred_moment[:,2] ,torch.tensor([0.]).to(self.device))
-            pred_moment[:,3] = torch.max(pred_moment[:,3] ,torch.tensor([0.]).to(self.device))
-        pred_moment_norm=torch.empty((x.shape), dtype=torch.float32, device = self.device)
-        pred_moment_norm[:,:self.out_features] = (pred_moment - self.inputs_mean[:self.out_features]) / self.inputs_std[:self.out_features]
-        
-        tau = pred_moment[:,2]/(pred_moment[:,2]+pred_moment[:,0])  #Taking tau and xc from the calculated outputs
-        xc = pred_moment[:,0]/ (pred_moment[:,1] + 1e-8)
-        
-        pred_moment_norm[:,4] = (tau - self.inputs_mean[4]) / self.inputs_std[4]
-        pred_moment_norm[:,5] = (xc - self.inputs_mean[5]) / self.inputs_std[5]
-        
-        pred_moment_norm[:,6:]=x[:,6:]  #Doesn't need to be normalized/un-normalized
-        
-         #Add plotting here
+    def calc_new_x(self,y,k): 
         if self.plot_while_training:
            
             if (self.global_step % 2000) == 0:
-                fig,figname = self.plot_preds(x=real_x[:,:self.out_features],x_pred = pred_moment)
+                fig,figname = self.plot_preds()
                 self.logger.experiment.add_figure(figname + ": Step  " +str(k), fig, self.global_step)
         
-        return pred_moment_norm
-    
-    def plot_preds(self,x,x_pred):
-        x=x.cpu().detach().numpy()
-        y=x_pred.cpu().detach().numpy()
+        
+        if k < self.step_size-1:
+            self.x_old = y
+            tau = self.pred_moment[:,2]/(self.pred_moment[:,2] + self.pred_moment[:,0])  #Taking tau and xc from the calculated outputs
+            xc = self.pred_moment[:,0]/ (self.pred_moment[:,1] + 1e-8)
+            
+            self.x[:,4] = (tau - self.inputs_mean[4]) / self.inputs_std[4]
+            self.x[:,5] = (xc - self.inputs_mean[5]) / self.inputs_std[5]
+            self.x[:,:4] = self.pred_moment_norm
+
+            #Add plotting of the new x created jus to see the difference
+            if (self.global_step % 2000) == 0:
+                fig,figname = self.plot_new_input()
+                self.logger.experiment.add_figure(figname + ": Step  " +str(k), fig, self.global_step)
+       
+        
+         
+        
+        
+    def plot_new_input(self):
+        x = self.x_old * self.inputs_std[:self.out_features] + self.inputs_mean[:self.out_features]
+        x = x.cpu().detach().numpy()
+        y = self.x[:,:self.out_features] * self.inputs_std[:self.out_features] + self.inputs_mean[:self.out_features]
+        y = y.cpu().detach().numpy()
+        
         var=["Lc","Nc","Lr","Nr"]
         c=["#26235b","#bc473a","#812878","#f69824"]
+        sns.set_theme(style="darkgrid")
         fig = plt.figure(figsize=(15, 12))
-
         for i in range (4):
             ax = fig.add_subplot(2,2, i + 1)
             plt.scatter(x[:,i],y[:,i],color=c[i])
+
+            plt.title(var[i])
+            plt.ylabel("As calculated during training")
+            plt.xlabel("Original Input")
+            plt.tight_layout()
+
+            figname= "Comparison of calculated inputs vs orig "
+        
+        return fig,figname
+        
+    def plot_preds(self):
+        x=self.real_x[:,:self.out_features].cpu().detach().numpy()
+        y=self.pred_moment.cpu().detach().numpy()
+        var=["Lc","Nc","Lr","Nr"]
+        c=["#26235b","#bc473a","#812878","#f69824"]
+        sns.set_theme(style="darkgrid")
+        fig = plt.figure(figsize=(15, 12))
+        for i in range (4):
+            ax = fig.add_subplot(2,2, i + 1)
+            sns.regplot(x[:,i],y[:,i],color=c[i])
 
             plt.title(var[i])
             plt.ylabel("Neural Network Predictions")
