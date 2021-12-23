@@ -9,17 +9,21 @@ learning_rate: 2e-4
 act: torch.nn.ReLU()
 loss_func: null
 
-n_layers: 5
+n_layers: 3
 ns: 200
-out_features: 4
+
 depth: 9
 p: 0.25
 norm: Standard_Norm
 inputs_mean: null
 inputs_std: null
 loss_absolute: True
-mass_cons_loss: True
+mass_cons_loss_moments: True
+mass_cons_loss_updates: False
+hard_constraints_moments: True
+hard_constraints_updates: True 
 multi_step: True
 step_size: 2
 
-max_epochs: 1
+max_epochs: 100
+use_batch_norm: False

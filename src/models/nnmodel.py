@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from tqdm.notebook import tqdm
 import torch.optim as optim
 
 
@@ -26,7 +25,7 @@ class Network(nn.Module):
         for i in range(n_layers):
             
             self.layers.append(nn.Linear(in_features,ns ))
-            nn.init.kaiming_normal_(self.layers[i].weight, mode='fan_out')
+            #nn.init.kaiming_normal_(self.layers[i].weight, mode='fan_out')
             in_features=ns
 
         self.layers.append(nn.Linear(ns,out_features))
@@ -52,22 +51,26 @@ class Network(nn.Module):
     
 class plNetwork(nn.Module):
 
-    def __init__(self,act,n_layers=5,ns=200,out_features=4,depth=9,p=0.25):
+    def __init__(self,act,n_layers=5,ns=200,out_features=4,depth=9,p=0.25,use_batch_norm = False):
         
         super().__init__()
         
         
         self.layers = []
+        self.layer_size =[]
 
         in_features = depth
         for i in range(n_layers):
             
             self.layers.append(nn.Linear(in_features,ns ))
-            nn.init.kaiming_normal_(self.layers[i].weight, mode='fan_out')
+            #nn.init.kaiming_normal_(self.layers[i].weight, mode='fan_out')
+            if use_batch_norm:
+                self.layers.append(nn.BatchNorm1d(ns)) 
             in_features=ns
 
         self.layers.append(nn.Linear(ns,out_features))
         self.layers = nn.ModuleList(self.layers)
+        self.bn = nn.BatchNorm1d(num_features=320)
         self.dropout = nn.Dropout(p)
         self.activation = act
         self.n_layers=n_layers
