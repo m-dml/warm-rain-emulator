@@ -53,9 +53,6 @@ class LightningModel(pl.LightningModule):
         self.num_workers=48
         self.plot_while_training=plot_while_training
         self.save_hyperparameters() 
-
-        self.loss= torch.empty((self.step_size,1),dtype=torch.float32,device=self.device,requires_grad=True)
-        
         self.updates_std=torch.from_numpy(updates_std).float().to('cuda')
         self.updates_mean=torch.from_numpy(updates_mean).float().to('cuda')
         self.inputs_mean=torch.from_numpy(inputs_mean).float().to('cuda')
@@ -87,10 +84,11 @@ class LightningModel(pl.LightningModule):
             
             
             """Checking the predicted values"""
-            self.real_updates[:,0] = torch.min(self.real_updates[:,0],torch.tensor([0.]).to(self.device))
-            self.real_updates[:,1] = torch.min(self.real_updates[:,1] ,torch.tensor([0.]).to(self.device))
-            self.real_updates[:,2] = torch.max(self.real_updates[:,2] ,torch.tensor([0.]).to(self.device))
-            #self.real_updates[:,3] = torch.min(self.real_updates[:,3] ,self.real_updates[:,1]/2)
+            del_lc = torch.min(self.real_updates[:,0],torch.tensor([0.]).to(self.device)).reshape(-1,1)
+            del_nc = torch.min(self.real_updates[:,1] ,torch.tensor([0.]).to(self.device)).reshape(-1,1)
+            del_lr = torch.max(self.real_updates[:,2] ,torch.tensor([0.]).to(self.device)).reshape(-1,1)
+            del_nr = self.real_updates[:,3].reshape(-1,1)
+            self.real_updates = torch.cat((del_lc,del_nc,del_lr,del_nr),axis=1)
             self.updates = (self.real_updates - self.updates_mean) / self.updates_std #normalized and stored as updates, to be used for direct comaprison
 
             
@@ -102,11 +100,12 @@ class LightningModel(pl.LightningModule):
         if self.hard_constraints_moments:
            
             """Checking moments"""
-           
-            self.pred_moment[:,0]= torch.max(torch.min(self.pred_moment[:,0], Lo), torch.tensor([0.]).to(self.device))
-            self.pred_moment[:,1] = torch.max(self.pred_moment[:,1] ,torch.tensor([0.]).to(self.device))
-            self.pred_moment[:,2]= torch.max(torch.min(self.pred_moment[:,2], Lo), torch.tensor([0.]).to(self.device))
-            self.pred_moment[:,3] = torch.max(self.pred_moment[:,3] ,torch.tensor([0.]).to(self.device))
+            lb = torch.zeros((1,4)).to(self.device)
+            ub_num_counts = (lb.new_full((self.batch_size, 1), 1e12)).reshape(-1,1).to(self.device)
+            ub = torch.cat((Lo.reshape(-1,1),ub_num_counts,Lo.reshape(-1,1),ub_num_counts),axis = 1).to(self.device)
+          
+            self.pred_moment = torch.max(torch.min(self.pred_moment, ub), lb)
+
         
           
         if self.mass_cons_loss_moments:
@@ -142,7 +141,7 @@ class LightningModel(pl.LightningModule):
         
     
     def configure_optimizers(self):
-        optimizer=  torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer=  torch.optim.Adam(self.model.parameters(), lr=self.lr)
         
         return optimizer
 
@@ -153,47 +152,51 @@ class LightningModel(pl.LightningModule):
            Dim updates, y: batch, moments,step size"""
            
         self.x,updates,y = batch
-        
+        self.loss_each_step=[]
+        self.cumulative_loss=[]
         for k in range (self.step_size):
             
             self.forward()
             assert self.updates is not None
-            with torch.no_grad():
-                self.loss [k,:] = self.loss_function(updates[:,:,k].float(),y[:,:,k].float())
-            
-            
+            self.loss_each_step.append(self.loss_function(updates[:,:,k].float(),y[:,:,k].float()))
+            if k > 0:
+                self.cumulative_loss.append(self.loss_each_step[-1] + self.cumulative_loss[-1])
+            else:
+                self.cumulative_loss.append(self.loss_each_step[-1])
+                
             if self.step_size > 1:
                 self.calc_new_x(y[:,:,k].float(),k)
             new_str="Train_loss_" + str(k)
-            self.log(new_str, self.loss[k])
+            self.log(new_str, self.loss_each_step[k])
        
+        self.log("train_loss", self.cumulative_loss[-1].reshape(1,1) )
         
-       
-        loss_tot = self.loss.sum().reshape(1,1) 
-       
-    
-        self.log("train_loss", loss_tot)
-        #break point
-        return loss_tot
+        return self.cumulative_loss[-1]
 
     
     
     def validation_step(self, batch, batch_idx):
         self.x,updates,y = batch
-        
+        self.loss_each_step=[]
+        self.cumulative_loss=[]
         for k in range (self.step_size):
+            
             self.forward()
             assert self.updates is not None
-            with torch.no_grad():
-                self.loss[k,:]= self.loss_function(updates[:,:,k].float(),y[:,:,k].float())
-          
+            self.loss_each_step.append(self.loss_function(updates[:,:,k].float(),y[:,:,k].float()))
+            if k > 0:
+                self.cumulative_loss.append(self.loss_each_step[-1] + self.cumulative_loss[-1])
+            else:
+                self.cumulative_loss.append(self.loss_each_step[-1])
+            
             if self.step_size > 1:
                 self.calc_new_x(y[:,:,k].float(),k)
-
-        loss_tot = self.loss.sum().reshape(1,1) 
-        self.log("val_loss", loss_tot)
-        #breakpoint
-        return loss_tot
+            new_str="Val_loss_" + str(k)
+            self.log(new_str, self.loss_each_step[k])
+       
+    
+        self.log("val_loss", self.cumulative_loss[-1].reshape(1,1) )
+        return self.cumulative_loss[-1]
 
 
 
@@ -224,14 +227,11 @@ class LightningModel(pl.LightningModule):
             self.x[:,5] = (xc - self.inputs_mean[5]) / self.inputs_std[5]
             self.x[:,:4] = self.pred_moment_norm
 
-            #Add plotting of the new x created jus to see the difference
+            #Add plotting of the new x created just to see the difference
             if (self.global_step % 2000) == 0:
                 fig,figname = self.plot_new_input()
                 self.logger.experiment.add_figure(figname + ": Step  " +str(k), fig, self.global_step)
        
-        
-         
-        
         
     def plot_new_input(self):
         x = self.x_old * self.inputs_std[:self.out_features] + self.inputs_mean[:self.out_features]

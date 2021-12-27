@@ -70,7 +70,6 @@ class plNetwork(nn.Module):
 
         self.layers.append(nn.Linear(ns,out_features))
         self.layers = nn.ModuleList(self.layers)
-        self.bn = nn.BatchNorm1d(num_features=320)
         self.dropout = nn.Dropout(p)
         self.activation = act
         self.n_layers=n_layers
