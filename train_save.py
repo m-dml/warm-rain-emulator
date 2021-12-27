@@ -58,9 +58,9 @@ def cli_main():
     
     checkpoint_callback = ModelCheckpoint(monitor="val_loss", save_top_k=1, mode='min', save_last=True)
 
-    early_stop = EarlyStopping(monitor="val_loss", patience=10, verbose=True)
+    #early_stop = EarlyStopping(monitor="train_loss", patience=10, verbose=True)
 
-    trainer = pl.Trainer(callbacks=[checkpoint_callback],gpus=GPUS, max_epochs=N_EPOCHS,num_sanity_val_steps=0,val_check_interval=1000)
+    trainer = pl.Trainer(callbacks=[checkpoint_callback],gpus=GPUS, max_epochs=N_EPOCHS,num_sanity_val_steps=0,val_check_interval=0.01)
 
     trainer.fit(pl_model,data_module)
 
