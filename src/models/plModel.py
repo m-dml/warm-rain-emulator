@@ -18,7 +18,7 @@ class LightningModel(pl.LightningModule):
                  depth=9,p=0.25,inputs_mean=None,inputs_std=None,
                  mass_cons_loss_updates=False,loss_absolute=True,mass_cons_loss_moments=True,hard_constraints_updates=True,
                  hard_constraints_moments=False,
-                 multi_step=False,step_size=1,moment_scheme=2,plot_while_training=True,use_batch_norm=False):
+                 multi_step=False,step_size=1,moment_scheme=2,plot_while_training=False,use_batch_norm=False):
         super().__init__()
         #self.automatic_optimization = False
         self.moment_scheme= moment_scheme
@@ -76,7 +76,7 @@ class LightningModel(pl.LightningModule):
         self.updates = updates.float()
         self.check_values()
         
-        
+
     def check_values(self):
         
         self.real_updates = self.updates * self.updates_std + self.updates_mean # Un-normalize
@@ -101,7 +101,7 @@ class LightningModel(pl.LightningModule):
            
             """Checking moments"""
             lb = torch.zeros((1,4)).to(self.device)
-            ub_num_counts = (lb.new_full((self.batch_size, 1), 1e12)).reshape(-1,1).to(self.device)
+            ub_num_counts = (lb.new_full((Lo.shape[0], 1), 1e10)).reshape(-1,1).to(self.device)
             ub = torch.cat((Lo.reshape(-1,1),ub_num_counts,Lo.reshape(-1,1),ub_num_counts),axis = 1).to(self.device)
           
             self.pred_moment = torch.max(torch.min(self.pred_moment, ub), lb)
@@ -116,6 +116,7 @@ class LightningModel(pl.LightningModule):
         self.pred_moment_norm = torch.empty((self.pred_moment.shape), dtype=torch.float32,device = self.device)
         self.pred_moment_norm[:,:self.out_features] = (self.pred_moment - self.inputs_mean[:self.out_features]) / self.inputs_std[:self.out_features]
 
+        
         
         
     def loss_function(self,updates,y):
@@ -159,7 +160,8 @@ class LightningModel(pl.LightningModule):
             self.forward()
             assert self.updates is not None
             self.loss_each_step.append(self.loss_function(updates[:,:,k].float(),y[:,:,k].float()))
-            if k > 0:
+            if k > 0: 
+                """First step of training"""
                 self.cumulative_loss.append(self.loss_each_step[-1] + self.cumulative_loss[-1])
             else:
                 self.cumulative_loss.append(self.loss_each_step[-1])
@@ -191,8 +193,7 @@ class LightningModel(pl.LightningModule):
             
             if self.step_size > 1:
                 self.calc_new_x(y[:,:,k].float(),k)
-            new_str="Val_loss_" + str(k)
-            self.log(new_str, self.loss_each_step[k])
+           
        
     
         self.log("val_loss", self.cumulative_loss[-1].reshape(1,1) )
@@ -201,14 +202,10 @@ class LightningModel(pl.LightningModule):
 
 
 
-    def test_step(self, batch, batch_idx):
-        self.x,updates, y = batch
-        pred = self.forward(self.x)
-        loss = self.loss_function(pred,updates,self.x,y)
-        
-        self.predictions_pred.append(pred)
-        self.predictions_actual.append(y)
-        return pred,y
+    def test_step(self, initial_moments): #For moment-wise evaluation as used for ODE solve
+        with torch.no_grad():
+            pred = self.model(initial_moments.float())
+        return pred
     
     def calc_new_x(self,y,k): 
         if self.plot_while_training:
