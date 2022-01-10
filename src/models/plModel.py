@@ -2,11 +2,9 @@ import logging
 import os
 import numpy as np
 import pytorch_lightning as pl
-from pytorch_lightning import Trainer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
 from src.models.nnmodel import plNetwork
 from matplotlib import pyplot as plt
 import seaborn as sns
@@ -29,9 +27,9 @@ class LightningModel(pl.LightningModule):
         p=0.25,
         inputs_mean=None,
         inputs_std=None,
-        mass_cons_loss_updates=False,
+        mass_cons_updates=False,
         loss_absolute=True,
-        mass_cons_loss_moments=True,
+        mass_cons_moments=True,
         hard_constraints_updates=True,
         hard_constraints_moments=False,
         multi_step=False,
@@ -53,8 +51,8 @@ class LightningModel(pl.LightningModule):
         self.batch_size = batch_size
 
         self.loss_absolute = loss_absolute
-        self.mass_cons_loss_updates = mass_cons_loss_updates
-        self.mass_cons_loss_moments = mass_cons_loss_moments
+        self.mass_cons_updates = mass_cons_updates
+        self.mass_cons_moments = mass_cons_moments
 
         """ Using the following only makes sense for multi-step training"""
         self.hard_constraints_updates = hard_constraints_updates
@@ -70,14 +68,14 @@ class LightningModel(pl.LightningModule):
 
         if (
             self.hard_constraints_moments == False
-            and self.mass_cons_loss_moments == True
+            and self.mass_cons_moments == True
         ):
             print(
                 "not using hard constraints on updates while choosing to conserve mass can lead to negative moments"
             )
 
         # For mass conservation
-        if self.mass_cons_loss_updates:
+        if self.mass_cons_updates:
             out_features -= 1
             """The model will now only produce 3 outputs and give delLc = -delLr """
 
@@ -153,7 +151,7 @@ class LightningModel(pl.LightningModule):
 
             self.pred_moment = torch.max(torch.min(self.pred_moment, ub), lb)
 
-        if self.mass_cons_loss_moments:
+        if self.mass_cons_moments:
 
             """ Best not to use if hard constraints are not used in moments"""
             self.pred_moment[:, 0] = Lo - self.pred_moment[:, 2] #Lc calculated from Lr
