@@ -16,9 +16,7 @@ class my_dataset(Dataset):
         self.index_arr = index_arr
         self.step_size = step_size
         self.moment_scheme = moment_scheme
-        self.tend_new = np.empty((self.moment_scheme * 2, self.step_size))
-        self.out_new = np.empty((self.moment_scheme * 2, self.step_size))
-
+    
     def __getitem__(self, index):
         i_time, i_ic, i_repeat = self.index_arr[index]
         tend_multistep = np.empty(
@@ -26,7 +24,7 @@ class my_dataset(Dataset):
         )  # tendencies
         outputs_multistep = np.empty(
             (self.moment_scheme * 2, self.step_size)
-        )  # outputs (moments?)
+        )  # outputs (moments)
         for i_step in range(self.step_size):
             tend_multistep[:, i_step] = self.tend[i_time + i_step, i_ic, i_repeat]
             outputs_multistep[:, i_step] = self.outputs[i_time + i_step, i_ic, i_repeat]
@@ -53,24 +51,24 @@ class DataModule(pl.LightningDataModule):
         data_dir="/gpfs/work/sharmas/mc-snow-data/",
         batch_size: int = 256,
         num_workers: int = 1,
-        transform=None,
         tot_len=719,
         sim_num=98,
         load_from_memory=True,
         moment_scheme=2,
         step_size=1,
+        train_size=0.9
     ):
         """
 
         :param data_dir: directory with data
         :param batch_size:
         :param num_workers:
-        :param transform:
         :param tot_len: number of unique initial conditions
         :param sim_num: number of repeated simulations for each initial condition
         :param load_from_memory:
         :param moment_scheme:
         :param step_size: number of steps in the future to predict during training, minimum is 1
+        :param train_size: fraction of data that will be used for training out of all data
         """
         super().__init__()
 
@@ -82,6 +80,7 @@ class DataModule(pl.LightningDataModule):
         self.sim_num = sim_num
         self.step_size = step_size
         self.load_simulations = load_from_memory
+        self.train_size = train_size
         if self.load_simulations:
             """
             All the array are of the shape:
@@ -96,7 +95,6 @@ class DataModule(pl.LightningDataModule):
             with np.load(data_dir + "/tendencies.npz") as npz:
                 self.tend_arr = np.ma.MaskedArray(**npz)
 
-            self.n_moments = self.outputs_arr.shape[-1]
 
         else:
             raise ValueError(
@@ -125,7 +123,7 @@ class DataModule(pl.LightningDataModule):
         l_in = self.calc_index_array_size()
         self.indices_arr = np.empty(
             (l_in * self.sim_num, 3), dtype=np.int
-        )  # (98 * np.sum(time))
+        )  
 
         lo = 0
 
@@ -135,7 +133,7 @@ class DataModule(pl.LightningDataModule):
                 np.ma.compress_rows(self.tend_arr[:, i, 0, :]).shape[0]
                 - self.step_size
                 + 1
-            )  # put stepping here
+            ) 
 
             time_points = np.arange(l)
             unique_sim_num = np.full(shape=l, fill_value=i, dtype=np.int)
@@ -174,7 +172,7 @@ class DataModule(pl.LightningDataModule):
 
         # Creating data indices for training and validation splits:
 
-        train_size = int(0.9 * self.dataset.__len__())
+        train_size = int(self.train_size * self.dataset.__len__())
         val_size = self.dataset.__len__() - train_size
 
         self.train_dataset, self.val_dataset = torch.utils.data.random_split(

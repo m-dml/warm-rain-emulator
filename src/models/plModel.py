@@ -44,7 +44,9 @@ class LightningModel(pl.LightningModule):
         # self.automatic_optimization = False
         self.moment_scheme = moment_scheme
         self.out_features = moment_scheme * 2
-        out_features = self.out_features
+        """Necessary for keeping out_features for plModel 
+        and nnmodel different when necessary"""
+        out_features = self.out_features 
         self.lr = learning_rate
         self.loss_func = loss_func
         self.beta = beta
@@ -54,7 +56,7 @@ class LightningModel(pl.LightningModule):
         self.mass_cons_loss_updates = mass_cons_loss_updates
         self.mass_cons_loss_moments = mass_cons_loss_moments
 
-        # Using the following only makes sense for multi-step training
+        """ Using the following only makes sense for multi-step training"""
         self.hard_constraints_updates = hard_constraints_updates
         self.hard_constraints_moments = hard_constraints_moments
 
@@ -77,7 +79,7 @@ class LightningModel(pl.LightningModule):
         # For mass conservation
         if self.mass_cons_loss_updates:
             out_features -= 1
-            """Subsequent changes to the model to be added"""
+            """The model will now only produce 3 outputs and give delLc = -delLr """
 
         self.multi_step = multi_step
         self.step_size = step_size
@@ -88,8 +90,6 @@ class LightningModel(pl.LightningModule):
         self.updates_mean = torch.from_numpy(updates_mean).float().to("cuda")
         self.inputs_mean = torch.from_numpy(inputs_mean).float().to("cuda")
         self.inputs_std = torch.from_numpy(inputs_std).float().to("cuda")
-        self.predictions_pred = None
-        self.predictions_actual = None
 
         self.model = self.initialization_model(
             act, n_layers, ns, self.out_features, depth, p, use_batch_norm
@@ -103,8 +103,8 @@ class LightningModel(pl.LightningModule):
         return model
 
     def forward(self):
-        updates = self.model(self.x.float())
-        self.updates = updates.float()
+        self.updates = self.model(self.x)
+        #self.updates = updates.float()
         self.check_values()
 
     def check_values(self):
@@ -138,32 +138,32 @@ class LightningModel(pl.LightningModule):
         self.pred_moment = self.real_x + self.real_updates * 20
         Lo = (
             self.x[:, -3] * self.inputs_std[-3] + self.inputs_mean[-3]
-        )  # For total water
+        )  # For total water content
         if self.hard_constraints_moments:
 
             """Checking moments"""
             lb = torch.zeros((1, 4)).to(self.device)
             ub_num_counts = (
                 (lb.new_full((Lo.shape[0], 1), 1e10)).reshape(-1, 1).to(self.device)
-            )
+            ) # Upper bounds for number counts
             ub = torch.cat(
                 (Lo.reshape(-1, 1), ub_num_counts, Lo.reshape(-1, 1), ub_num_counts),
                 axis=1,
-            ).to(self.device)
+            ).to(self.device) #creating upper bounds for all four moments
 
             self.pred_moment = torch.max(torch.min(self.pred_moment, ub), lb)
 
         if self.mass_cons_loss_moments:
 
-            # Best not to use if hard constraints are not used in moments
-            self.pred_moment[:, 0] = Lo - self.pred_moment[:, 2]
+            """ Best not to use if hard constraints are not used in moments"""
+            self.pred_moment[:, 0] = Lo - self.pred_moment[:, 2] #Lc calculated from Lr
 
         self.pred_moment_norm = torch.empty(
             (self.pred_moment.shape), dtype=torch.float32, device=self.device
         )
         self.pred_moment_norm[:, : self.out_features] = (
             self.pred_moment - self.inputs_mean[: self.out_features]
-        ) / self.inputs_std[: self.out_features]
+        ) / self.inputs_std[: self.out_features] #Normalized value of predicted moments (not updates)
 
     def loss_function(self, updates, y):
 
@@ -190,10 +190,11 @@ class LightningModel(pl.LightningModule):
 
         return optimizer
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch):
 
         """Dim self.x: batch, inputs (4 moments,self.xc,tau,3 initial conditions)
-        Dim updates, y: batch, moments,step size"""
+        Dim updates, y: batch, moments,step size
+        y = x + updates*20"""
 
         self.x, updates, y = batch
         self.loss_each_step = []
@@ -203,7 +204,7 @@ class LightningModel(pl.LightningModule):
             self.forward()
             assert self.updates is not None
             self.loss_each_step.append(
-                self.loss_function(updates[:, :, k].float(), y[:, :, k].float())
+                self.loss_function(updates[:, :, k], y[:, :, k])
             )
             if k > 0:
                 """First step of training"""
@@ -222,7 +223,7 @@ class LightningModel(pl.LightningModule):
 
         return self.cumulative_loss[-1]
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch):
         self.x, updates, y = batch
         self.loss_each_step = []
         self.cumulative_loss = []
@@ -231,7 +232,7 @@ class LightningModel(pl.LightningModule):
             self.forward()
             assert self.updates is not None
             self.loss_each_step.append(
-                self.loss_function(updates[:, :, k].float(), y[:, :, k].float())
+                self.loss_function(updates[:, :, k], y[:, :, k])
             )
             if k > 0:
                 self.cumulative_loss.append(
@@ -246,9 +247,8 @@ class LightningModel(pl.LightningModule):
         self.log("val_loss", self.cumulative_loss[-1].reshape(1, 1))
         return self.cumulative_loss[-1]
 
-    def test_step(
-        self, initial_moments
-    ):  # For moment-wise evaluation as used for ODE solve
+    def test_step(self, initial_moments):  
+        """ For moment-wise evaluation as used for ODE solve"""
         with torch.no_grad():
             pred = self.model(initial_moments.float())
         return pred
@@ -263,6 +263,10 @@ class LightningModel(pl.LightningModule):
                 )
 
         if k < self.step_size - 1:
+            """A new x is calculated at every step. Takes moments as calculated 
+               from NN outputs (pred_moment_norm) along with other paramters 
+               that are fed as inputs to the network (pred_moment)"""
+               
             self.x_old = y
             tau = self.pred_moment[:, 2] / (
                 self.pred_moment[:, 2] + self.pred_moment[:, 0]
@@ -272,6 +276,7 @@ class LightningModel(pl.LightningModule):
             self.x[:, 4] = (tau - self.inputs_mean[4]) / self.inputs_std[4]
             self.x[:, 5] = (xc - self.inputs_mean[5]) / self.inputs_std[5]
             self.x[:, :4] = self.pred_moment_norm
+            
 
             # Add plotting of the new x created just to see the difference
             if self.plot_while_training:
