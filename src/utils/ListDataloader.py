@@ -1,5 +1,4 @@
 import numpy as np
-import os
 import pytorch_lightning as pl
 import torch
 import pickle
@@ -9,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 class my_dataset(Dataset):
     def __init__(self, data, index_arr, listing, step_size, moment_scheme):
         self.inputdata = data[listing["inputs"]]
-        self.tend = data[listing["updates"]]
+        self.updates = data[listing["updates"]]
         self.outputs = data[listing["outputs"]]
 
         self.index_arr = index_arr
@@ -18,17 +17,17 @@ class my_dataset(Dataset):
 
     def __getitem__(self, index):
         i_time, i_ic, i_repeat = self.index_arr[index]
-        tend_multistep = np.empty(
+        updates_multistep = np.empty(
             (self.moment_scheme * 2, self.step_size)
         )  # tendencies
         outputs_multistep = np.empty(
             (self.moment_scheme * 2, self.step_size)
         )  # outputs (moments)
         for i_step in range(self.step_size):
-            tend_multistep[:, i_step] = self.tend[i_ic][i_repeat][i_time + i_step]
+            updates_multistep[:, i_step] = self.updates[i_ic][i_repeat][i_time + i_step]
             outputs_multistep[:, i_step] = self.outputs[i_ic][i_repeat][i_time + i_step]
 
-        return self.inputdata[i_ic][i_repeat][i_time], tend_multistep, outputs_multistep
+        return self.inputdata[i_ic][i_repeat][i_time], updates_multistep, outputs_multistep
 
     def __len__(self):
         return self.index_arr.shape[0]
@@ -60,6 +59,10 @@ class DataModule(pl.LightningDataModule):
         self.listing = {"inputs": 0, "outputs": 1, "updates": 2}
         with open(data_dir + "all_sim_data.pkl", "rb") as f:
             self.all_data = pickle.load(f)
+        """Loads the dataset containing a nested ragged list. Dim as follows: 
+        self.all_data[quantity][initial_conditions][no of times same ICs repeated][Time]. 
+        The time dimension varies among sims with different ICs.
+        For the first dim [quantity]: see self.listing"""
 
     def calc_means_stds(self, var):  # for dealing with ragged lists
         """Works by first calculating sum and mean, followed by deviation from mean"""
@@ -82,41 +85,25 @@ class DataModule(pl.LightningDataModule):
                 tot_sqr_sum += np.sum(((sim - m) ** 2), axis=0)
 
         s = np.sqrt(tot_sqr_sum / tot_num)
-        print("done means")
         return m, s
 
     def calc_norm(self, m, s, var):
-        print(var)
         sim = self.all_data[self.listing[var]][0][0]
-        print(sim.shape)
-
-        # assert m and s is not None
+        assert m.all() and s.all() is not None
         for ic in range(self.tot_len):
             for rep in range(self.sim_num):
                 sim = self.all_data[self.listing[var]][ic][rep]
 
-                self.all_data[self.listing[var]][ic][rep] = np.float32((sim - m) / s)
+                self.all_data[self.listing[var]][ic][rep] = (sim - m) / s
 
-        print("norms")
+        
 
     def setup(self):
         self.inputs_mean, self.inputs_std = self.calc_means_stds(var="inputs")
-        print("done here")
         self.calc_norm(self.inputs_mean, self.inputs_std, var="inputs")
-        print("done here")
         self.updates_mean, self.updates_std = self.calc_means_stds(var="updates")
         self.calc_norm(self.updates_mean, self.updates_std, var="updates")
-        m = self.inputs_mean[
-            :4,
-        ]
-        s = self.inputs_std[
-            :4,
-        ]
-        print(m)
-        self.calc_norm(m=m, s=s, var="outputs")
-
-        # Temporarily
-        # self.inputs_mean, self.inputs_std, self.updates_mean, self.updates_std=np.repeat(self.inputs_mean,9),np.repeat(self.inputs_std,9), np.repeat(self.updates_mean,4), np.repeat(self.updates_std,4)
+        self.calc_norm(m=self.inputs_mean[:4,], s=self.inputs_std[:4,], var="outputs")
         self.calc_index_array()
         self.test_train()
 
@@ -125,7 +112,7 @@ class DataModule(pl.LightningDataModule):
         l_in = 0
         for i in range(self.tot_len):
             l = (
-                (self.all_data[0][i][0][:]).shape[0] - self.step_size + 1
+                self.all_data[0][i][0][:].shape[0] - self.step_size + 1
             )  # put stepping here
             l_in += l
         return l_in
@@ -133,14 +120,14 @@ class DataModule(pl.LightningDataModule):
     def calc_index_array(self):
         """Create an array of indices such that col1, col2,col3: Time, ic_sim, sim_no"""
         l_in = self.calc_index_array_size()
-        self.indices_arr = np.empty((l_in * self.sim_num, 3), dtype=np.int)
+        self.index_arr = np.empty((l_in * self.sim_num, 3), dtype=np.int)
 
         lo = 0
 
         sim_nums = np.arange(self.sim_num)
         for i in range(self.tot_len):
             l = (
-                np.ma.compress_rows(self.all_data[0][i][0][:]).shape[0]
+                self.all_data[0][i][0][:].shape[0]
                 - self.step_size
                 + 1
             )
@@ -155,14 +142,14 @@ class DataModule(pl.LightningDataModule):
             sim_num_axis = np.repeat(sim_nums, l, axis=0)
 
             indices_sim = np.concatenate((new_arr, sim_num_axis.reshape(-1, 1)), axis=1)
-            self.indices_arr[lo : lo + indices_sim.shape[0], :] = indices_sim
+            self.index_arr[lo : lo + indices_sim.shape[0], :] = indices_sim
             lo += indices_sim.shape[0]
 
     def test_train(self):
 
         self.dataset = my_dataset(
             self.all_data,
-            self.indices_arr,
+            self.index_arr,
             self.listing,
             self.step_size,
             self.moment_scheme,
@@ -194,3 +181,4 @@ class DataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
         )
+   
