@@ -1,10 +1,8 @@
-import logging
 import os
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from src.models.nnmodel import plNetwork
 from matplotlib import pyplot as plt
 import seaborn as sns
@@ -101,8 +99,8 @@ class LightningModel(pl.LightningModule):
         return model
 
     def forward(self):
-        self.updates = self.model(self.x)
-        #self.updates = updates.float()
+        updates = self.model(self.x.float())
+        self.updates = updates.float()
         self.check_values()
 
     def check_values(self):
@@ -147,7 +145,8 @@ class LightningModel(pl.LightningModule):
             ub = torch.cat(
                 (Lo.reshape(-1, 1), ub_num_counts, Lo.reshape(-1, 1), ub_num_counts),
                 axis=1,
-            ).to(self.device) #creating upper bounds for all four moments
+            ).to(self.device)
+            #creating upper bounds for all four moments
 
             self.pred_moment = torch.max(torch.min(self.pred_moment, ub), lb)
 
@@ -176,34 +175,36 @@ class LightningModel(pl.LightningModule):
         if self.loss_absolute:
             pred_loss = criterion(self.pred_moment_norm, y)
 
-            return pred_loss
-
-        elif self.loss_absolute == False:
+        else:
             pred_loss = criterion(updates, self.updates)
 
-            return pred_loss
+        return pred_loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         return optimizer
 
-    def training_step(self, batch):
+    def training_step(self, batch, batch_idx):
 
         """Dim self.x: batch, inputs (4 moments,self.xc,tau,3 initial conditions)
         Dim updates, y: batch, moments,step size
         y = x + updates*20"""
 
         self.x, updates, y = batch
+        self.x = self.x.type(torch.DoubleTensor).to('cuda')
+        print("Extracted data from batch")
         self.loss_each_step = []
         self.cumulative_loss = []
         for k in range(self.step_size):
-
+           
             self.forward()
+          
             assert self.updates is not None
             self.loss_each_step.append(
-                self.loss_function(updates[:, :, k], y[:, :, k])
+                self.loss_function(updates[:, :, k].float(), y[:, :, k].float())
             )
+            
             if k > 0:
                 """First step of training"""
                 self.cumulative_loss.append(
@@ -218,11 +219,13 @@ class LightningModel(pl.LightningModule):
             self.log(new_str, self.loss_each_step[k])
 
         self.log("train_loss", self.cumulative_loss[-1].reshape(1, 1))
-
+       
         return self.cumulative_loss[-1]
 
-    def validation_step(self, batch):
+    def validation_step(self, batch,batch_idx):
+        print("In Val Loop")
         self.x, updates, y = batch
+        self.x = self.x.type(torch.DoubleTensor).to('cuda')
         self.loss_each_step = []
         self.cumulative_loss = []
         for k in range(self.step_size):
@@ -230,7 +233,7 @@ class LightningModel(pl.LightningModule):
             self.forward()
             assert self.updates is not None
             self.loss_each_step.append(
-                self.loss_function(updates[:, :, k], y[:, :, k])
+                self.loss_function(updates[:, :, k].float(), y[:, :, k].float())
             )
             if k > 0:
                 self.cumulative_loss.append(
