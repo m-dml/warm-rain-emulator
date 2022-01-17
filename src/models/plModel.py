@@ -42,7 +42,7 @@ class LightningModel(pl.LightningModule):
         self.out_features = moment_scheme * 2
         """Necessary for keeping out_features for plModel 
         and nnmodel different when necessary"""
-        out_features = self.out_features 
+        out_features = self.out_features
         self.lr = learning_rate
         self.loss_func = loss_func
         self.beta = beta
@@ -64,10 +64,7 @@ class LightningModel(pl.LightningModule):
                 "Setting hard constrainsts on moments while none on updates can lead to problems"
             )
 
-        if (
-            self.hard_constraints_moments == False
-            and self.mass_cons_moments == True
-        ):
+        if self.hard_constraints_moments == False and self.mass_cons_moments == True:
             print(
                 "not using hard constraints on updates while choosing to conserve mass can lead to negative moments"
             )
@@ -141,26 +138,30 @@ class LightningModel(pl.LightningModule):
             lb = torch.zeros((1, 4)).to(self.device)
             ub_num_counts = (
                 (lb.new_full((Lo.shape[0], 1), 1e10)).reshape(-1, 1).to(self.device)
-            ) # Upper bounds for number counts
+            )  # Upper bounds for number counts
             ub = torch.cat(
                 (Lo.reshape(-1, 1), ub_num_counts, Lo.reshape(-1, 1), ub_num_counts),
                 axis=1,
             ).to(self.device)
-            #creating upper bounds for all four moments
+            # creating upper bounds for all four moments
 
             self.pred_moment = torch.max(torch.min(self.pred_moment, ub), lb)
 
         if self.mass_cons_moments:
 
-            """ Best not to use if hard constraints are not used in moments"""
-            self.pred_moment[:, 0] = Lo - self.pred_moment[:, 2] #Lc calculated from Lr
+            """Best not to use if hard constraints are not used in moments"""
+            self.pred_moment[:, 0] = (
+                Lo - self.pred_moment[:, 2]
+            )  # Lc calculated from Lr
 
         self.pred_moment_norm = torch.empty(
             (self.pred_moment.shape), dtype=torch.float32, device=self.device
         )
         self.pred_moment_norm[:, : self.out_features] = (
             self.pred_moment - self.inputs_mean[: self.out_features]
-        ) / self.inputs_std[: self.out_features] #Normalized value of predicted moments (not updates)
+        ) / self.inputs_std[
+            : self.out_features
+        ]  # Normalized value of predicted moments (not updates)
 
     def loss_function(self, updates, y):
 
@@ -192,64 +193,55 @@ class LightningModel(pl.LightningModule):
         y = x + updates*20"""
 
         self.x, updates, y = batch
-        self.x = self.x.type(torch.DoubleTensor).to('cuda')
-        print("Extracted data from batch")
-        self.loss_each_step = []
-        self.cumulative_loss = []
+        self.x = self.x.type(torch.DoubleTensor).to(self.device)
+        
+        self.loss_each_step, self.cumulative_loss = torch.tensor(
+            (0.0), dtype=torch.float32, device=self.device
+        ), torch.tensor((0.0), dtype=torch.float32, device=self.device)
         for k in range(self.step_size):
-           
+
             self.forward()
-          
+
             assert self.updates is not None
-            self.loss_each_step.append(
-                self.loss_function(updates[:, :, k].float(), y[:, :, k].float())
+            self.loss_each_step = self.loss_function(
+                updates[:, :, k].float(), y[:, :, k].float()
             )
-            
-            if k > 0:
-                """First step of training"""
-                self.cumulative_loss.append(
-                    self.loss_each_step[-1] + self.cumulative_loss[-1]
-                )
-            else:
-                self.cumulative_loss.append(self.loss_each_step[-1])
+            self.cumulative_loss = self.cumulative_loss + self.loss_each_step
+    
 
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k].float(), k)
             new_str = "Train_loss_" + str(k)
-            self.log(new_str, self.loss_each_step[k])
+            self.log(new_str, self.loss_each_step)
 
-        self.log("train_loss", self.cumulative_loss[-1].reshape(1, 1))
-       
-        return self.cumulative_loss[-1]
+        self.log("train_loss", self.cumulative_loss.reshape(1, 1))
 
-    def validation_step(self, batch,batch_idx):
+        return self.cumulative_loss
+
+    def validation_step(self, batch, batch_idx):
         print("In Val Loop")
         self.x, updates, y = batch
-        self.x = self.x.type(torch.DoubleTensor).to('cuda')
-        self.loss_each_step = []
-        self.cumulative_loss = []
+        self.x = self.x.type(torch.DoubleTensor).to("cuda")
+        self.loss_each_step, self.cumulative_loss = torch.tensor(
+            (0.0), dtype=torch.float32, device=self.device
+        ), torch.tensor((0.0), dtype=torch.float32, device=self.device)
         for k in range(self.step_size):
 
             self.forward()
             assert self.updates is not None
-            self.loss_each_step.append(
-                self.loss_function(updates[:, :, k].float(), y[:, :, k].float())
+            self.loss_each_step = self.loss_function(
+                updates[:, :, k].float(), y[:, :, k].float()
             )
-            if k > 0:
-                self.cumulative_loss.append(
-                    self.loss_each_step[-1] + self.cumulative_loss[-1]
-                )
-            else:
-                self.cumulative_loss.append(self.loss_each_step[-1])
+            self.cumulative_loss = self.cumulative_loss + self.loss_each_step
 
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k].float(), k)
 
-        self.log("val_loss", self.cumulative_loss[-1].reshape(1, 1))
-        return self.cumulative_loss[-1]
+        self.log("val_loss", self.cumulative_loss.reshape(1, 1))
+        return self.cumulative_loss
 
-    def test_step(self, initial_moments):  
-        """ For moment-wise evaluation as used for ODE solve"""
+    def test_step(self, initial_moments):
+        """For moment-wise evaluation as used for ODE solve"""
         with torch.no_grad():
             pred = self.model(initial_moments.float())
         return pred
@@ -264,10 +256,10 @@ class LightningModel(pl.LightningModule):
                 )
 
         if k < self.step_size - 1:
-            """A new x is calculated at every step. Takes moments as calculated 
-               from NN outputs (pred_moment_norm) along with other paramters 
-               that are fed as inputs to the network (pred_moment)"""
-               
+            """A new x is calculated at every step. Takes moments as calculated
+            from NN outputs (pred_moment_norm) along with other paramters
+            that are fed as inputs to the network (pred_moment)"""
+
             self.x_old = y
             tau = self.pred_moment[:, 2] / (
                 self.pred_moment[:, 2] + self.pred_moment[:, 0]
@@ -277,7 +269,6 @@ class LightningModel(pl.LightningModule):
             self.x[:, 4] = (tau - self.inputs_mean[4]) / self.inputs_std[4]
             self.x[:, 5] = (xc - self.inputs_mean[5]) / self.inputs_std[5]
             self.x[:, :4] = self.pred_moment_norm
-            
 
             # Add plotting of the new x created just to see the difference
             if self.plot_while_training:
