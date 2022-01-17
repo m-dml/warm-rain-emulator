@@ -27,7 +27,11 @@ class my_dataset(Dataset):
             updates_multistep[:, i_step] = self.updates[i_ic][i_repeat][i_time + i_step]
             outputs_multistep[:, i_step] = self.outputs[i_ic][i_repeat][i_time + i_step]
 
-        return self.inputdata[i_ic][i_repeat][i_time], updates_multistep, outputs_multistep
+        return (
+            self.inputdata[i_ic][i_repeat][i_time],
+            updates_multistep,
+            outputs_multistep,
+        )
 
     def __len__(self):
         return self.index_arr.shape[0]
@@ -63,7 +67,23 @@ class DataModule(pl.LightningDataModule):
         self.all_data[quantity][initial_conditions][no of times same ICs repeated][Time]. 
         The time dimension varies among sims with different ICs.
         For the first dim [quantity]: see self.listing"""
-
+    def setup(self):
+        self.inputs_mean, self.inputs_std = self.calc_means_stds(var="inputs")
+        self.calc_norm(self.inputs_mean, self.inputs_std, var="inputs")
+        self.updates_mean, self.updates_std = self.calc_means_stds(var="updates")
+        self.calc_norm(self.updates_mean, self.updates_std, var="updates")
+        self.calc_norm(
+            m=self.inputs_mean[
+                : self.moment_scheme * 2,
+            ],
+            s=self.inputs_std[
+                : self.moment_scheme * 2,
+            ],
+            var="outputs",
+        )
+        self.calc_index_array()
+        self.test_train()
+        
     def calc_means_stds(self, var):  # for dealing with ragged lists
         """Works by first calculating sum and mean, followed by deviation from mean"""
         l = self.all_data[self.listing[var]][0][0].shape[-1]
@@ -96,16 +116,7 @@ class DataModule(pl.LightningDataModule):
 
                 self.all_data[self.listing[var]][ic][rep] = (sim - m) / s
 
-        
-
-    def setup(self):
-        self.inputs_mean, self.inputs_std = self.calc_means_stds(var="inputs")
-        self.calc_norm(self.inputs_mean, self.inputs_std, var="inputs")
-        self.updates_mean, self.updates_std = self.calc_means_stds(var="updates")
-        self.calc_norm(self.updates_mean, self.updates_std, var="updates")
-        self.calc_norm(m=self.inputs_mean[:4,], s=self.inputs_std[:4,], var="outputs")
-        self.calc_index_array()
-        self.test_train()
+    
 
     def calc_index_array_size(self):
         """Gives the total length of index array depending on the time length of the simulations"""
@@ -126,11 +137,7 @@ class DataModule(pl.LightningDataModule):
 
         sim_nums = np.arange(self.sim_num)
         for i in range(self.tot_len):
-            l = (
-                self.all_data[0][i][0][:].shape[0]
-                - self.step_size
-                + 1
-            )
+            l = self.all_data[0][i][0][:].shape[0] - self.step_size + 1
 
             time_points = np.arange(l)
             unique_sim_num = np.full(shape=l, fill_value=i, dtype=np.int)
@@ -181,4 +188,3 @@ class DataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
         )
-   
