@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from src.models.nnmodel import plNetwork
-from src.solvers.ode import simulation_forecast,SB_forecast
+from src.solvers.ode import simulation_forecast, SB_forecast
 from matplotlib import pyplot as plt
 import seaborn as sns
 
@@ -38,7 +38,7 @@ class LightningModel(pl.LightningModule):
         plot_while_training=False,
         plot_all_moments=True,
         use_batch_norm=False,
-        use_dropout=False
+        use_dropout=False,
     ):
         super().__init__()
         # self.automatic_optimization = False
@@ -97,7 +97,9 @@ class LightningModel(pl.LightningModule):
     @staticmethod
     def initialization_model(act, n_layers, ns, out_features, depth, p, use_batch_norm):
         os.chdir("/gpfs/work/sharmas/mc-snow-data/")
-        model = plNetwork(act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout)
+        model = plNetwork(
+            act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
+        )
         model.train()
         return model
 
@@ -184,7 +186,6 @@ class LightningModel(pl.LightningModule):
 
         else:
             pred_loss = self.criterion(updates, self.updates)
-            
 
         return pred_loss
 
@@ -201,7 +202,7 @@ class LightningModel(pl.LightningModule):
 
         self.x, updates, y = batch
         self.x = self.x.type(torch.DoubleTensor).to(self.device)
-        
+
         self.loss_each_step, self.cumulative_loss = torch.tensor(
             (0.0), dtype=torch.float32, device=self.device
         ), torch.tensor((0.0), dtype=torch.float32, device=self.device)
@@ -214,7 +215,6 @@ class LightningModel(pl.LightningModule):
                 updates[:, :, k].float(), y[:, :, k].float()
             )
             self.cumulative_loss = self.cumulative_loss + self.loss_each_step
-    
 
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k].float(), k)
@@ -252,9 +252,11 @@ class LightningModel(pl.LightningModule):
         with torch.no_grad():
             pred = self.model(initial_moments.float())
         return pred
-    
-    def on_train_batch_start(self, batch: Any, batch_idx: int, dataloader_idx: int) -> None:
-        #Give a check here for batch_idx so that it's only called once
+
+    def on_train_batch_start(
+        self, batch: Any, batch_idx: int, dataloader_idx: int
+    ) -> None:
+        # Give a check here for batch_idx so that it's only called once
         self.x, updates, y = batch
         self.x = self.x.type(torch.DoubleTensor).to("cuda")
         self.loss_each_step, self.cumulative_loss = torch.tensor(
@@ -269,7 +271,6 @@ class LightningModel(pl.LightningModule):
                 updates[:, :, k].float(), y[:, :, k].float()
             )
             self.cumulative_loss = self.cumulative_loss + self.loss_each_step
-    
 
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k].float(), k)
@@ -277,22 +278,27 @@ class LightningModel(pl.LightningModule):
             self.log(new_str, self.loss_each_step)
 
         self.log("train_loss", self.cumulative_loss.reshape(1, 1))
-        
-    def on_train_batch_end(self, batch: Any, batch_idx: int, dataloader_idx: int) -> None:
-        
+
+    def on_train_batch_end(
+        self, batch: Any, batch_idx: int, dataloader_idx: int
+    ) -> None:
+
         self.x, updates, y = batch
         if self.plot_all_moments:
-            loss_lc,loss_nc,loss_lr,loss_nr = self.criterion(updates[:,0], self.updates[:,0]),
-            self.criterion(updates[:,1], self.updates[:,1]),self.criterion(updates[:,2], self.updates[:,2]),
-            self.criterion(updates[:,3], self.updates[:,3])
-            
-            self.logger.experiment.add_scalars('Loss_', 
-                                            {'Lc': loss_lc, 
-                                            'Nc': loss_nc,
-                                            'Lr':loss_lr, 
-                                            'Nr': loss_nr},
-                                            global_step=self.global_step)
-            
+            loss_lc, loss_nc, loss_lr, loss_nr = (
+                self.criterion(updates[:, 0], self.updates[:, 0]),
+            )
+            self.criterion(updates[:, 1], self.updates[:, 1]), self.criterion(
+                updates[:, 2], self.updates[:, 2]
+            ),
+            self.criterion(updates[:, 3], self.updates[:, 3])
+
+            self.logger.experiment.add_scalars(
+                "Loss_",
+                {"Lc": loss_lc, "Nc": loss_nc, "Lr": loss_lr, "Nr": loss_nr},
+                global_step=self.global_step,
+            )
+
         self.x = self.x.type(torch.DoubleTensor).to("cuda")
         self.pers_loss_each_step, self.pers_cumulative_loss = torch.tensor(
             (0.0), dtype=torch.float32, device=self.device
@@ -300,12 +306,14 @@ class LightningModel(pl.LightningModule):
 
         """Persistence baseline calculated here"""
         for k in range(self.step_size):
-            self.updates = torch.zeros((1,4),device=self.device) 
+            self.updates = torch.zeros((1, 4), device=self.device)
             self.check_values()
             self.per_loss_each_step = self.loss_function(
                 updates[:, :, k].float(), y[:, :, k].float()
             )
-            self.pers_cumulative_loss = self.pers_cumulative_loss + self.pers_loss_each_step
+            self.pers_cumulative_loss = (
+                self.pers_cumulative_loss + self.pers_loss_each_step
+            )
 
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k].float(), k)
@@ -313,16 +321,26 @@ class LightningModel(pl.LightningModule):
             self.log(new_str, self.pers_loss_each_step)
 
         self.log("Persistence_Loss", self.pers_cumulative_loss.reshape(1, 1))
-        
 
     def training_epoch_end(self, outputs) -> None:
         """With the trained model, calculate the ODE solution"""
-        nn_forecast = simulation_forecast()
         assert self.data_module.single_sim is not None
-        nn_forecast.setup(self.all_data,self.model,self.data_module.single_sim, self.data_module)
-        #Add the plotting function here
-        
-        return super().training_epoch_end(outputs)
+        nn_forecast = simulation_forecast(
+            self.all_data, self.model, self.data_module.single_sim, self.data_module
+        )
+        nn_forecast.test()
+
+        sb_forecast = SB_forecast(self.all_data, self.single_sim)
+        sb_forecast.SB_calc()
+        predictions_sb = np.asarray(sb_forecast.predictions).reshape(-1, 4)
+        fig = self.plot_ode_solution(
+            np.asarray(nn_forecast.moment_preds).reshape(-1, 4),
+            nn_forecast.orig,
+            predictions_sb,
+            0,
+            nn_forecast.model_params,
+        )
+        self.logger.experiment.add_figure(fig, self.global_step)
 
     def calc_new_x(self, y, k):
         if self.plot_while_training:
@@ -355,9 +373,35 @@ class LightningModel(pl.LightningModule):
                     self.logger.experiment.add_figure(
                         figname + ": Step  " + str(k), fig, self.global_step
                     )
-    def plot_moment_loss(self):
-        
-                
+
+    def plot_ode_solution(self, predictions_orig, targets_orig, sb_preds, model_params):
+        sns.set_style("darkgrid", {"grid.color": ".6", "grid.linestyle": ":"})
+        var = ["Lc", "Nc", "Lr", "Nr"]
+        color = ["#26235b", "#bc473a", "#812878", "#f69824"]
+        fig = plt.figure()
+        fig.set_size_inches(13, 10)
+        time = [x for x in range(0, len(predictions_orig))]
+        # color=iter(cm.rainbow(np.linspace(0,1,4)))
+        for i in range(4):
+            ax = fig.add_subplot(2, 2, i + 1)
+            plt.plot(time[:], predictions_orig[:, i], c=color[i])
+            plt.plot(time[:], targets_orig[:, i], c="black")
+            plt.plot(time[:-1], sb_preds[:, i], c=color[i], linestyle="dashed")
+            # plt.fill_between(time[:], targets_orig[:,i]-var_all[:len(time),i], targets_orig[:,i]+var_all[:len(time),i],facecolor = "gray")
+            # plt.plot(time[:], targets_orig[:,i]-var_all[:len(time),i])
+            plt.title(var[i])
+            plt.xlabel("Timestep")
+
+            plt.legend(["Neural Network", "Simulations", "SB2001"])
+
+        fig.suptitle(
+            "Lo: %.4f; rm:%.6f ; Nu: %.1f "
+            % ((model_params[0]), (model_params[1]), (model_params[2])),
+            fontsize="x-large",
+        )
+
+        return fig
+
     def plot_new_input(self):
         x = (
             self.x_old * self.inputs_std[: self.out_features]
