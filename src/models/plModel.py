@@ -37,8 +37,8 @@ class LightningModel(pl.LightningModule):
         step_size=1,
         moment_scheme=2,
         plot_while_training=False,
-        plot_all_moments=True,
-        calc_persistence_loss=True,
+        plot_all_moments=False,
+        calc_persistence_loss=False,
         use_batch_norm=False,
         use_dropout=False,
     ):
@@ -102,7 +102,7 @@ class LightningModel(pl.LightningModule):
         )
 
     @staticmethod
-    def initialization_model(act, n_layers, ns, out_features, depth, p, use_batch_norm):
+    def initialization_model(act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout):
         os.chdir("/gpfs/work/sharmas/mc-snow-data/")
         model = plNetwork(
             act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
@@ -260,19 +260,19 @@ class LightningModel(pl.LightningModule):
         return preds
 
     def on_train_batch_start(
-        self, batch: Any, batch_idx: int, dataloader_idx: int
+        self, batch, batch_idx, dataloader_idx
     ) -> None:
         # Give a check here for batch_idx so that it's only called once
         try:
-            assert self.global_step==1
+            assert self.global_step == 1
             self.x, updates, y = batch
             self.x = self.x.type(torch.DoubleTensor).to(self.device)
             self.loss_each_step, self.cumulative_loss = torch.tensor(
                 (0.0), dtype=torch.float32, device=self.device
             ), torch.tensor((0.0), dtype=torch.float32, device=self.device)
             for k in range(self.step_size):
-
-                self.forward()
+                with torch.no_grad():
+                    self.forward()
 
                 assert self.updates is not None
                 self.loss_each_step = self.loss_function(
@@ -291,7 +291,7 @@ class LightningModel(pl.LightningModule):
             pass
 
     def on_train_batch_end(
-        self, batch: Any, batch_idx: int, dataloader_idx: int
+        self, batch, batch_idx, dataloader_idx
     ) -> None:
         self.x, updates, y = batch
         try:
