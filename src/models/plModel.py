@@ -4,6 +4,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from src.models.nnmodel import plNetwork
+from src.solvers.ode import simulation_forecast,SB_forecast
 from matplotlib import pyplot as plt
 import seaborn as sns
 
@@ -11,6 +12,7 @@ import seaborn as sns
 class LightningModel(pl.LightningModule):
     def __init__(
         self,
+        data_module,
         updates_mean,
         updates_std,
         data_dir="/gpfs/work/sharmas/mc-snow-data/",
@@ -34,7 +36,9 @@ class LightningModel(pl.LightningModule):
         step_size=1,
         moment_scheme=2,
         plot_while_training=False,
+        plot_all_moments=True,
         use_batch_norm=False,
+        use_dropout=False
     ):
         super().__init__()
         # self.automatic_optimization = False
@@ -78,20 +82,22 @@ class LightningModel(pl.LightningModule):
         self.step_size = step_size
         self.num_workers = 48
         self.plot_while_training = plot_while_training
+        self.plot_all_moments = plot_all_moments
         self.save_hyperparameters()
+        self.data_module = data_module
         self.updates_std = torch.from_numpy(updates_std).float().to("cuda")
         self.updates_mean = torch.from_numpy(updates_mean).float().to("cuda")
         self.inputs_mean = torch.from_numpy(inputs_mean).float().to("cuda")
         self.inputs_std = torch.from_numpy(inputs_std).float().to("cuda")
 
         self.model = self.initialization_model(
-            act, n_layers, ns, self.out_features, depth, p, use_batch_norm
+            act, n_layers, ns, self.out_features, depth, p, use_batch_norm, use_dropout
         )
 
     @staticmethod
     def initialization_model(act, n_layers, ns, out_features, depth, p, use_batch_norm):
         os.chdir("/gpfs/work/sharmas/mc-snow-data/")
-        model = plNetwork(act, n_layers, ns, out_features, depth, p, use_batch_norm)
+        model = plNetwork(act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout)
         model.train()
         return model
 
@@ -154,10 +160,10 @@ class LightningModel(pl.LightningModule):
                 Lo - self.pred_moment[:, 2]
             )  # Lc calculated from Lr
 
-        self.pred_moment_norm = torch.empty(
-            (self.pred_moment.shape), dtype=torch.float32, device=self.device
-        )
-        self.pred_moment_norm[:, : self.out_features] = (
+        # self.pred_moment_norm = torch.empty(
+        #     (self.pred_moment.shape), dtype=torch.float32, device=self.device
+        # )
+        self.pred_moment_norm = (
             self.pred_moment - self.inputs_mean[: self.out_features]
         ) / self.inputs_std[
             : self.out_features
@@ -166,18 +172,19 @@ class LightningModel(pl.LightningModule):
     def loss_function(self, updates, y):
 
         if self.loss_func == "mse":
-            criterion = torch.nn.MSELoss()
+            self.criterion = torch.nn.MSELoss()
         elif self.loss_func == "mae":
-            criterion = torch.nn.L1Loss()
+            self.criterion = torch.nn.L1Loss()
         else:
-            criterion = torch.nn.SmoothL1Loss(reduction="mean", beta=self.beta)
+            self.criterion = torch.nn.SmoothL1Loss(reduction="mean", beta=self.beta)
 
         # For moments
         if self.loss_absolute:
-            pred_loss = criterion(self.pred_moment_norm, y)
+            pred_loss = self.criterion(self.pred_moment_norm, y)
 
         else:
-            pred_loss = criterion(updates, self.updates)
+            pred_loss = self.criterion(updates, self.updates)
+            
 
         return pred_loss
 
@@ -245,6 +252,77 @@ class LightningModel(pl.LightningModule):
         with torch.no_grad():
             pred = self.model(initial_moments.float())
         return pred
+    
+    def on_train_batch_start(self, batch: Any, batch_idx: int, dataloader_idx: int) -> None:
+        #Give a check here for batch_idx so that it's only called once
+        self.x, updates, y = batch
+        self.x = self.x.type(torch.DoubleTensor).to("cuda")
+        self.loss_each_step, self.cumulative_loss = torch.tensor(
+            (0.0), dtype=torch.float32, device=self.device
+        ), torch.tensor((0.0), dtype=torch.float32, device=self.device)
+        for k in range(self.step_size):
+
+            self.forward()
+
+            assert self.updates is not None
+            self.loss_each_step = self.loss_function(
+                updates[:, :, k].float(), y[:, :, k].float()
+            )
+            self.cumulative_loss = self.cumulative_loss + self.loss_each_step
+    
+
+            if self.step_size > 1:
+                self.calc_new_x(y[:, :, k].float(), k)
+            new_str = "Train_loss_" + str(k)
+            self.log(new_str, self.loss_each_step)
+
+        self.log("train_loss", self.cumulative_loss.reshape(1, 1))
+        
+    def on_train_batch_end(self, batch: Any, batch_idx: int, dataloader_idx: int) -> None:
+        
+        self.x, updates, y = batch
+        if self.plot_all_moments:
+            loss_lc,loss_nc,loss_lr,loss_nr = self.criterion(updates[:,0], self.updates[:,0]),
+            self.criterion(updates[:,1], self.updates[:,1]),self.criterion(updates[:,2], self.updates[:,2]),
+            self.criterion(updates[:,3], self.updates[:,3])
+            
+            self.logger.experiment.add_scalars('Loss_', 
+                                            {'Lc': loss_lc, 
+                                            'Nc': loss_nc,
+                                            'Lr':loss_lr, 
+                                            'Nr': loss_nr},
+                                            global_step=self.global_step)
+            
+        self.x = self.x.type(torch.DoubleTensor).to("cuda")
+        self.pers_loss_each_step, self.pers_cumulative_loss = torch.tensor(
+            (0.0), dtype=torch.float32, device=self.device
+        ), torch.tensor((0.0), dtype=torch.float32, device=self.device)
+
+        """Persistence baseline calculated here"""
+        for k in range(self.step_size):
+            self.updates = torch.zeros((1,4),device=self.device) 
+            self.check_values()
+            self.per_loss_each_step = self.loss_function(
+                updates[:, :, k].float(), y[:, :, k].float()
+            )
+            self.pers_cumulative_loss = self.pers_cumulative_loss + self.pers_loss_each_step
+
+            if self.step_size > 1:
+                self.calc_new_x(y[:, :, k].float(), k)
+            new_str = "Persistence_loss_at_step_" + str(k)
+            self.log(new_str, self.pers_loss_each_step)
+
+        self.log("Persistence_Loss", self.pers_cumulative_loss.reshape(1, 1))
+        
+
+    def training_epoch_end(self, outputs) -> None:
+        """With the trained model, calculate the ODE solution"""
+        nn_forecast = simulation_forecast()
+        assert self.data_module.single_sim is not None
+        nn_forecast.setup(self.all_data,self.model,self.data_module.single_sim, self.data_module)
+        #Add the plotting function here
+        
+        return super().training_epoch_end(outputs)
 
     def calc_new_x(self, y, k):
         if self.plot_while_training:
@@ -277,7 +355,9 @@ class LightningModel(pl.LightningModule):
                     self.logger.experiment.add_figure(
                         figname + ": Step  " + str(k), fig, self.global_step
                     )
-
+    def plot_moment_loss(self):
+        
+                
     def plot_new_input(self):
         x = (
             self.x_old * self.inputs_std[: self.out_features]
