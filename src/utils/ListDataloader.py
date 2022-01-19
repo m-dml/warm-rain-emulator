@@ -26,11 +26,11 @@ class my_dataset(Dataset):
         for i_step in range(self.step_size):
             updates_multistep[:, i_step] = self.updates[i_ic][i_repeat][i_time + i_step]
             outputs_multistep[:, i_step] = self.outputs[i_ic][i_repeat][i_time + i_step]
-
+      
         return (
-            self.inputdata[i_ic][i_repeat][i_time],
-            updates_multistep,
-            outputs_multistep,
+            torch.from_numpy(self.inputdata[i_ic][i_repeat][i_time]).view(-1,1).float(),
+            torch.from_numpy(updates_multistep).view(-1,1).float(),
+            torch.from_numpy(outputs_multistep).view(-1,1).float()
         )
 
     def __len__(self):
