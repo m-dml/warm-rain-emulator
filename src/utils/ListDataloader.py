@@ -29,8 +29,8 @@ class my_dataset(Dataset):
       
         return (
             torch.from_numpy(self.inputdata[i_ic][i_repeat][i_time]).view(-1,1).float(),
-            torch.from_numpy(updates_multistep).view(-1,1).float(),
-            torch.from_numpy(outputs_multistep).view(-1,1).float()
+            torch.from_numpy(updates_multistep).view(-1,self.step_size).float(),
+            torch.from_numpy(outputs_multistep).view(-1,self.step_size).float()
         )
 
     def __len__(self):
