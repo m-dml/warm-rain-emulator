@@ -1,6 +1,4 @@
 import os
-
-
 import numpy as np
 import torch
 from torch import nn
@@ -8,10 +6,13 @@ import sys
 
 
 class simulation_forecast:
-    def __init__(self, arr, new_model, sim_number, data_module):
+    def __init__(self, arr, new_model, sim_number, inputs_mean, inputs_std,updates_mean, updates_std):
         self.arr = arr
         self.sim_number = sim_number
-        self.data_module = data_module
+        self.inputs_mean = inputs_mean
+        self.inputs_std = inputs_std
+        self.updates_mean = updates_mean
+        self.updates_std = updates_std
         self.model = new_model
         self.moment_preds = []
         self.updates_prev = None
@@ -67,7 +68,7 @@ class simulation_forecast:
         # new_input_=np.concatenate((predictions_orig_[:,0:],self.model_params.reshape(1,-1),tau.reshape(1,-1),xc.reshape(1,-1)),axis=1)
 
         self.inputs = self.calc_mean(
-            inputs, self.data_module.inputs_mean, self.data_module.inputs_std
+            inputs, self.inputs_mean, self.inputs_std
         )
         self.inputs = np.float32(self.inputs)
 
@@ -106,11 +107,10 @@ class simulation_forecast:
 
     def moment_calc(self, predictions_updates):
         self.updates = (
-            predictions_updates.detach().numpy() * self.data_module.updates_std
-        ) + self.data_module.updates_mean
+            predictions_updates.detach().numpy() * self.updates_std
+        ) + self.updates_mean
         self.check_updates()
-        # =self.calc_mean(predictions_updates.detach().numpy(),self.data_module.updates_mean,self.data_module.updates_std)
-        # x_orig=(x[:4]*(data_module.outputs_std))+data_module.outputs_mean
+
         self.preds = self.sim_data[0:4] + (self.updates * 20)
         self.check_preds()
         self.moment_preds.append(self.preds)
