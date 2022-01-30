@@ -164,13 +164,13 @@ class DataModule(pl.LightningDataModule):
 
         if self.avg_dataloader:
             self.inputs_arr = np.expand_dims(
-                np.mean(self.inputs_arr[:, :, :, :], axis=1), axis=1
+                np.mean(self.inputs_arr[:, :, :, :], axis=1), axis=2
             )
             self.outputs_arr = np.expand_dims(
-                np.mean(self.outputs_arr[:, :, :, :], axis=1), axis=1
+                np.mean(self.outputs_arr[:, :, :, :], axis=1), axis=2
             )
             self.tend_arr = np.expand_dims(
-                np.mean(self.tend_arr[:, :, :, :], axis=1), axis=1
+                np.mean(self.tend_arr[:, :, :, :], axis=1), axis=2
             )
             self.sim_num = 1
 
