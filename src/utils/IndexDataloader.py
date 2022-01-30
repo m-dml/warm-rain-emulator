@@ -1,11 +1,7 @@
-import csv
 import numpy as np
-import os
 import pytorch_lightning as pl
 import torch
-from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from src.helpers.normalizer import give_norm
 
 
 class my_dataset(Dataset):
@@ -16,7 +12,7 @@ class my_dataset(Dataset):
         self.index_arr = index_arr
         self.step_size = step_size
         self.moment_scheme = moment_scheme
-    
+
     def __getitem__(self, index):
         i_time, i_ic, i_repeat = self.index_arr[index]
         tend_multistep = np.empty(
@@ -29,7 +25,13 @@ class my_dataset(Dataset):
             tend_multistep[:, i_step] = self.tend[i_time + i_step, i_ic, i_repeat]
             outputs_multistep[:, i_step] = self.outputs[i_time + i_step, i_ic, i_repeat]
 
-        return self.inputdata[i_time, i_ic, i_repeat], tend_multistep, outputs_multistep
+        return (
+            torch.from_numpy(self.inputdata[i_time, i_ic, i_repeat])
+            .view(-1, 1)
+            .float(),
+            torch.from_numpy(tend_multistep).view(-1, self.step_size).float(),
+            torch.from_numpy(outputs_multistep).view(-1, self.step_size).float(),
+        )
 
     def __len__(self):
         return self.index_arr.shape[0]
@@ -56,7 +58,9 @@ class DataModule(pl.LightningDataModule):
         load_from_memory=True,
         moment_scheme=2,
         step_size=1,
-        train_size=0.9
+        train_size=0.9,
+        single_sim_num=None,
+        avg_dataloader=False,
     ):
         """
 
@@ -72,7 +76,7 @@ class DataModule(pl.LightningDataModule):
         """
         super().__init__()
 
-        self.data_dir = data_dir
+        self.data_dir = "/gpfs/work/sharmas/mc-snow-data/"
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.moment_scheme = moment_scheme
@@ -81,20 +85,21 @@ class DataModule(pl.LightningDataModule):
         self.step_size = step_size
         self.load_simulations = load_from_memory
         self.train_size = train_size
+        self.single_sim_num = single_sim_num
+        self.avg_dataloader = avg_dataloader
         if self.load_simulations:
             """
             All the array are of the shape:
             (Time,initial_cond (tot 819),no of sim runs,[inputs/outputs/updates])
             """
-            with np.load(data_dir + "/inputs_all.npz") as npz:
+            with np.load(self.data_dir + "/inputs_all.npz") as npz:
                 self.inputs_arr = np.ma.MaskedArray(**npz)
 
-            with np.load(data_dir + "/outputs_all.npz") as npz:
+            with np.load(self.data_dir + "/outputs_all.npz") as npz:
                 self.outputs_arr = np.ma.MaskedArray(**npz)
 
-            with np.load(data_dir + "/tendencies.npz") as npz:
+            with np.load(self.data_dir + "/tendencies.npz") as npz:
                 self.tend_arr = np.ma.MaskedArray(**npz)
-
 
         else:
             raise ValueError(
@@ -102,8 +107,8 @@ class DataModule(pl.LightningDataModule):
             )
 
     def setup(self):
-        self.calc_index_array()
         self.calc_norm()
+        self.calc_index_array()
         self.test_train()
 
     def calc_index_array_size(self):
@@ -121,9 +126,7 @@ class DataModule(pl.LightningDataModule):
     def calc_index_array(self):
         """Create an array of indices such that col1, col2,col3: Time, ic_sim, sim_no"""
         l_in = self.calc_index_array_size()
-        self.indices_arr = np.empty(
-            (l_in * self.sim_num, 3), dtype=np.int
-        )  
+        self.indices_arr = np.empty((l_in * self.sim_num, 3), dtype=np.int)
 
         lo = 0
 
@@ -133,7 +136,7 @@ class DataModule(pl.LightningDataModule):
                 np.ma.compress_rows(self.tend_arr[:, i, 0, :]).shape[0]
                 - self.step_size
                 + 1
-            ) 
+            )
 
             time_points = np.arange(l)
             unique_sim_num = np.full(shape=l, fill_value=i, dtype=np.int)
@@ -158,6 +161,31 @@ class DataModule(pl.LightningDataModule):
         self.tend_arr, self.updates_mean, self.updates_std = normalize_data(
             self.tend_arr
         )
+
+        if self.avg_dataloader:
+            self.inputs_arr = np.expand_dims(
+                np.mean(self.inputs_arr[:, :, :, :], axis=1), axis=1
+            )
+            self.outputs_arr = np.expand_dims(
+                np.mean(self.outputs_arr[:, :, :, :], axis=1), axis=1
+            )
+            self.tend_arr = np.expand_dims(
+                np.mean(self.tend_arr[:, :, :, :], axis=1), axis=1
+            )
+            self.sim_num = 1
+
+        if self.single_sim_num:
+            self.inputs_arr = np.expand_dims(
+                self.inputs_arr[:, self.single_sim_num, :, :], axis=1
+            )
+            self.outputs_arr = np.expand_dims(
+                self.outputs_arr[:, self.single_sim_num, :, :], axis=1
+            )
+            self.tend_arr = np.expand_dims(
+                self.tend_arr[:, self.single_sim_num, :, :], axis=1
+            )
+
+            self.tot_len = 1
 
     def test_train(self):
 
