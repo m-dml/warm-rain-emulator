@@ -26,11 +26,13 @@ class my_dataset(Dataset):
         for i_step in range(self.step_size):
             updates_multistep[:, i_step] = self.updates[i_ic][i_repeat][i_time + i_step]
             outputs_multistep[:, i_step] = self.outputs[i_ic][i_repeat][i_time + i_step]
-      
+
         return (
-            torch.from_numpy(self.inputdata[i_ic][i_repeat][i_time]).view(-1,1).float(),
-            torch.from_numpy(updates_multistep).view(-1,self.step_size).float(),
-            torch.from_numpy(outputs_multistep).view(-1,self.step_size).float()
+            torch.from_numpy(self.inputdata[i_ic][i_repeat][i_time])
+            .view(-1, 1)
+            .float(),
+            torch.from_numpy(updates_multistep).view(-1, self.step_size).float(),
+            torch.from_numpy(outputs_multistep).view(-1, self.step_size).float(),
         )
 
     def __len__(self):
@@ -67,6 +69,7 @@ class DataModule(pl.LightningDataModule):
         self.all_data[quantity][initial_conditions][no of times same ICs repeated][Time]. 
         The time dimension varies among sims with different ICs.
         For the first dim [quantity]: see self.listing"""
+
     def setup(self):
         self.inputs_mean, self.inputs_std = self.calc_means_stds(var="inputs")
         self.calc_norm(self.inputs_mean, self.inputs_std, var="inputs")
@@ -83,7 +86,7 @@ class DataModule(pl.LightningDataModule):
         )
         self.calc_index_array()
         self.test_train()
-        
+
     def calc_means_stds(self, var):  # for dealing with ragged lists
         """Works by first calculating sum and mean, followed by deviation from mean"""
         l = self.all_data[self.listing[var]][0][0].shape[-1]
@@ -115,8 +118,6 @@ class DataModule(pl.LightningDataModule):
                 sim = self.all_data[self.listing[var]][ic][rep]
 
                 self.all_data[self.listing[var]][ic][rep] = (sim - m) / s
-
-    
 
     def calc_index_array_size(self):
         """Gives the total length of index array depending on the time length of the simulations"""
