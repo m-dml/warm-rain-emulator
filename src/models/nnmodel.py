@@ -44,9 +44,6 @@ class plNetwork(nn.Module):
 
         x = self.layers[-1](x)
 
-        if x.shape[-1] == 3:
-            delLc = -x[:, 1]
-            x = torch.cat((delLc.reshape(-1, 1), x), axis=1)
         return x
 
     def forward(self, x):
