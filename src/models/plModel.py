@@ -6,7 +6,7 @@ import torch.nn as nn
 from src.models.nnmodel import plNetwork
 from matplotlib import pyplot as plt
 import seaborn as sns
-
+from src.helpers.normalizer import normalizer
 
 class LightningModel(pl.LightningModule):
     def __init__(
@@ -115,68 +115,12 @@ class LightningModel(pl.LightningModule):
     def forward(self):
         updates = self.model(self.x)
         self.updates = updates.float()
-        self.check_values()
-
-    def check_values(self):
-
-        self.real_updates = (
-            self.updates * self.updates_std + self.updates_mean
-        )  # Un-normalize
-        if self.hard_constraints_updates:
-
-            """Checking the predicted values"""
-            del_lc = torch.min(
-                self.real_updates[:, 0], torch.tensor([0.0]).to(self.device)
-            ).reshape(-1, 1)
-            del_nc = torch.min(
-                self.real_updates[:, 1], torch.tensor([0.0]).to(self.device)
-            ).reshape(-1, 1)
-            del_lr = torch.max(
-                self.real_updates[:, 2], torch.tensor([0.0]).to(self.device)
-            ).reshape(-1, 1)
-            del_nr = self.real_updates[:, 3].reshape(-1, 1)
-            self.real_updates = torch.cat((del_lc, del_nc, del_lr, del_nr), axis=1)
-            self.updates = (
-                self.real_updates - self.updates_mean
-            ) / self.updates_std  # normalized and stored as updates, to be used for direct comaprison
-
-        self.real_x = (
-            self.x[:, : self.out_features] * self.inputs_std[: self.out_features]
-            + self.inputs_mean[: self.out_features]
-        )  # un-normalize
-
-        self.pred_moment = self.real_x + self.real_updates * 20
-        Lo = (
-            self.x[:, -3] * self.inputs_std[-3] + self.inputs_mean[-3]
-        )  # For total water content
-        if self.hard_constraints_moments:
-
-            """Checking moments"""
-            lb = torch.zeros((1, 4)).to(self.device)
-            ub_num_counts = (
-                (lb.new_full((Lo.shape[0], 1), 1e10)).reshape(-1, 1).to(self.device)
-            )  # Upper bounds for number counts
-            ub = torch.cat(
-                (Lo.reshape(-1, 1), ub_num_counts, Lo.reshape(-1, 1), ub_num_counts),
-                axis=1,
-            ).to(self.device)
-            # creating upper bounds for all four moments
-
-            self.pred_moment = torch.max(torch.min(self.pred_moment, ub), lb)
-
-        if self.mass_cons_moments:
-
-            """Best not to use if hard constraints are not used in moments"""
-            self.pred_moment[:, 0] = (
-                Lo - self.pred_moment[:, 2]
-            )  # Lc calculated from Lr
-
-        self.pred_moment_norm = (
-            self.pred_moment - self.inputs_mean[: self.out_features]
-        ) / self.inputs_std[
-            : self.out_features
-        ]  # Normalized value of predicted moments (not updates)
-
+        self.norm_obj= normalizer(self.updates,
+                                    self.x,
+                                    self.updates_mean, self.updates_std, 
+                                    self.inputs_mean, self.inputs_std)
+        self.real_x, self.pred_moment, self.pred_moment_norm = self.norm_obj.calc_preds()
+       
     def loss_function(self, updates, y, k=None):
 
         if self.loss_func == "mse":
@@ -359,6 +303,7 @@ class LightningModel(pl.LightningModule):
             """A new x is calculated at every step. Takes moments as calculated
             from NN outputs (pred_moment_norm) along with other paramters
             that are fed as inputs to the network (pred_moment)"""
+            self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
             new_x = torch.empty_like(self.x)
             tau = self.pred_moment[:, 2] / (
                 self.pred_moment[:, 2] + self.pred_moment[:, 0]
