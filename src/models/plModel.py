@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from src.helpers.normalizer import normalizer
 
+
 class LightningModel(pl.LightningModule):
     def __init__(
         self,
@@ -53,30 +54,12 @@ class LightningModel(pl.LightningModule):
         self.batch_size = batch_size
 
         self.loss_absolute = loss_absolute
-        self.mass_cons_updates = mass_cons_updates
-        self.mass_cons_moments = mass_cons_moments
 
-        """ Using the following only makes sense for multi-step training"""
+        """ Using the following only for multi-step training"""
         self.hard_constraints_updates = hard_constraints_updates
         self.hard_constraints_moments = hard_constraints_moments
-
-        if (
-            self.hard_constraints_moments == True
-            and self.hard_constraints_updates == False
-        ):
-            print(
-                "Setting hard constrainsts on moments while none on updates can lead to problems"
-            )
-
-        if self.hard_constraints_moments == False and self.mass_cons_moments == True:
-            print(
-                "not using hard constraints on updates while choosing to conserve mass can lead to negative moments"
-            )
-
-        # For mass conservation
-        if self.mass_cons_updates:
-            out_features -= 1
-            """The model will now only produce 3 outputs and give delLc = -delLr """
+        self.mass_cons_updates = mass_cons_updates  # Serves no purpose now
+        self.mass_cons_moments = mass_cons_moments
 
         self.multi_step = multi_step
         self.step_size = step_size
@@ -102,25 +85,25 @@ class LightningModel(pl.LightningModule):
         )
 
     @staticmethod
-    def initialization_model(
-        act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
-    ):
+    def initialization_model(act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout):
         os.chdir("/gpfs/work/sharmas/mc-snow-data/")
-        model = plNetwork(
-            act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
-        )
+        model = plNetwork(act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout)
         model.train()
         return model
 
     def forward(self):
-        updates = self.model(self.x)
-        self.updates = updates.float()
-        self.norm_obj= normalizer(self.updates,
-                                    self.x,
-                                    self.updates_mean, self.updates_std, 
-                                    self.inputs_mean, self.inputs_std)
+        self.updates = self.model(self.x)
+        self.norm_obj = normalizer(
+            self.updates,
+            self.x,
+            self.updates_mean,
+            self.updates_std,
+            self.inputs_mean,
+            self.inputs_std,
+            self.device,
+        )
         self.real_x, self.pred_moment, self.pred_moment_norm = self.norm_obj.calc_preds()
-       
+
     def loss_function(self, updates, y, k=None):
 
         if self.loss_func == "mse":
@@ -134,12 +117,6 @@ class LightningModel(pl.LightningModule):
         if self.loss_absolute:
 
             pred_loss = self.criterion(self.pred_moment_norm, y)
-            try:
-                assert (self.training is True) and (self.global_step % 50 == 0)
-                assert k is not None and self.plot_all_moments is True
-                self._plot_all_moments(y, k)
-            except:
-                pass
 
         else:
             pred_loss = self.criterion(updates, self.updates)
@@ -176,21 +153,6 @@ class LightningModel(pl.LightningModule):
                 self.calc_new_x(y[:, :, k], k)
             new_str = "Train_loss_" + str(k)
             self.log(new_str, self.loss_each_step)
-
-        try:
-
-            assert self.calc_persistence_loss is True
-            self._persistence_log(batch)
-            self.logger.experiment.add_scalars(
-                "Persistence vs Training Loss",
-                {
-                    "Persistence": self.pers_cumulative_loss,
-                    "Training": self.cumulative_loss,
-                },
-                global_step=self.global_step,
-            )
-        except:
-
             self.log("train_loss", self.cumulative_loss.reshape(1, 1))
 
         return self.cumulative_loss
@@ -220,89 +182,19 @@ class LightningModel(pl.LightningModule):
             preds = self.model(initial_moments.float())
         return preds
 
-    def on_train_batch_start(self, batch, batch_idx, dataloader_idx) -> None:
-        # Give a check here for batch_idx so that it's only called once
-
-        try:
-            assert self.global_step == 0
-
-            self.x, updates, y = batch
-
-            self.x = self.x.squeeze().to(self.device)
-            self.loss_each_step = self.cumulative_loss = torch.tensor(
-                (0.0), dtype=torch.float32, device=self.device
-            )
-            for k in range(self.step_size):
-
-                self.forward()
-
-                assert self.updates is not None
-                self.loss_each_step = self.loss_function(
-                    updates[:, :, k].to(self.device), y[:, :, k].to(self.device)
-                )
-                self.cumulative_loss = self.cumulative_loss + self.loss_each_step
-
-                if self.step_size > 1:
-                    self.calc_new_x(y[:, :, k], k)
-
-            # print("Here")
-            self.log("train_loss", self.cumulative_loss.reshape(1, 1))
-
-        except:
-            pass
-
-    def _plot_all_moments(self, y, k):
-
-        loss_lc = self.criterion(self.pred_moment_norm[:, 0], y[:, 0])
-
-        loss_nc = self.criterion(self.pred_moment_norm[:, 1], y[:, 1])
-        loss_lr = self.criterion(self.pred_moment_norm[:, 2], y[:, 2])
-        loss_nr = self.criterion(self.pred_moment_norm[:, 3], y[:, 3])
-
-        self.logger.experiment.add_scalars(
-            "Loss_step_" + str(k),
-            {"Lc": loss_lc, "Nc": loss_nc, "Lr": loss_lr, "Nr": loss_nr},
-            global_step=self.global_step,
-        )
-
-    def _persistence_log(self, batch):
-
-        self.x, updates, y = batch
-
-        self.x = self.x.squeeze().to(self.device)
-        self.pers_loss_each_step = self.pers_cumulative_loss = torch.tensor(
-            (0.0), dtype=torch.float32, device=self.device
-        )
-
-        """Persistence baseline calculated here"""
-        for k in range(self.step_size):
-            self.updates = torch.zeros((1, 4), device=self.device)
-            self.check_values()
-
-            self.per_loss_each_step = self.loss_function(
-                updates[:, :, k].to(self.device), y[:, :, k].to(self.device)
-            )
-
-            self.pers_cumulative_loss = (
-                self.pers_cumulative_loss + self.pers_loss_each_step
-            )
-
-            if self.step_size > 1:
-                self.calc_new_x(y[:, :, k], k)
-
     def calc_new_x(self, y, k):
         if self.plot_while_training:
 
             if (self.global_step % 2000) == 0:
                 fig, figname = self.plot_preds()
-                self.logger.experiment.add_figure(
-                    figname + ": Step  " + str(k), fig, self.global_step
-                )
+                self.logger.experiment.add_figure(figname + ": Step  " + str(k), fig, self.global_step)
 
         if k < self.step_size - 1:
             """A new x is calculated at every step. Takes moments as calculated
             from NN outputs (pred_moment_norm) along with other paramters
             that are fed as inputs to the network (pred_moment)"""
+
+            
             self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
             new_x = torch.empty_like(self.x)
             tau = self.pred_moment[:, 2] / (
