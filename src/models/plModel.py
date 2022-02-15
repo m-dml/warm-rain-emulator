@@ -36,7 +36,6 @@ class LightningModel(pl.LightningModule):
         moment_scheme=2,
         plot_while_training=False,
         plot_all_moments=True,
-        calc_persistence_loss=True,
         use_batch_norm=False,
         use_dropout=False,
         single_sim_num=None,
@@ -45,9 +44,6 @@ class LightningModel(pl.LightningModule):
         super().__init__()
         self.moment_scheme = moment_scheme
         self.out_features = moment_scheme * 2
-        """Necessary for keeping out_features for plModel 
-        and nnmodel different when necessary"""
-        out_features = self.out_features
         self.lr = learning_rate
         self.loss_func = loss_func
         self.beta = beta
@@ -66,7 +62,6 @@ class LightningModel(pl.LightningModule):
         self.num_workers = 48
         self.plot_while_training = plot_while_training
         self.plot_all_moments = plot_all_moments
-        self.calc_persistence_loss = calc_persistence_loss
         self.single_sim_num = single_sim_num
         self.avg_dataloader = avg_dataloader
         self.save_hyperparameters()
@@ -75,6 +70,8 @@ class LightningModel(pl.LightningModule):
         self.updates_mean = torch.from_numpy(updates_mean).float().to("cuda")
         self.inputs_mean = torch.from_numpy(inputs_mean).float().to("cuda")
         self.inputs_std = torch.from_numpy(inputs_std).float().to("cuda")
+        self.val_preds = self.val_y = []
+        self.train_preds = self.train_y = []
 
         # Some plotting stuff
         self.color = ["#26235b", "#bc473a", "#812878", "#f69824"]
@@ -85,9 +82,13 @@ class LightningModel(pl.LightningModule):
         )
 
     @staticmethod
-    def initialization_model(act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout):
-        os.chdir("/gpfs/work/sharmas/mc-snow-data/")
-        model = plNetwork(act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout)
+    def initialization_model(
+        act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
+    ):
+        os.chdir("/gpfs/work/sharmas/mc-snow-data/new_exp")
+        model = plNetwork(
+            act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
+        )
         model.train()
         return model
 
@@ -101,8 +102,15 @@ class LightningModel(pl.LightningModule):
             self.inputs_mean,
             self.inputs_std,
             self.device,
+            self.hard_constraints_updates,
+            self.hard_constraints_moments,
         )
-        self.real_x, self.pred_moment, self.pred_moment_norm = self.norm_obj.calc_preds()
+        (
+            self.real_x,
+            self.pred_moment,
+            self.pred_moment_norm,
+        ) = self.norm_obj.calc_preds()
+        self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
 
     def loss_function(self, updates, y, k=None):
 
@@ -117,6 +125,12 @@ class LightningModel(pl.LightningModule):
         if self.loss_absolute:
 
             pred_loss = self.criterion(self.pred_moment_norm, y)
+            try:
+                assert (self.training is True) and (self.global_step % 10 == 0)
+                assert k is not None and self.plot_all_moments is True
+                self._plot_all_moments(y, k)
+            except:
+                pass
 
         else:
             pred_loss = self.criterion(updates, self.updates)
@@ -135,6 +149,9 @@ class LightningModel(pl.LightningModule):
         y = x + updates*20"""
 
         self.x, updates, y = batch
+        print(y.cpu().numpy().shape)
+
+        self.val_y.append(y.cpu().numpy())
         self.x = self.x.squeeze()
 
         self.loss_each_step = self.cumulative_loss = torch.tensor(
@@ -159,22 +176,46 @@ class LightningModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         self.x, updates, y = batch
+        # self.val_y.append(y.cpu().numpy())
         self.x = self.x.squeeze()
 
         self.loss_each_step = self.cumulative_loss = torch.tensor(
             (0.0), dtype=torch.float32, device=self.device
         )
+        val_preds_step = []
         for k in range(self.step_size):
-
             self.forward()
             assert self.updates is not None
             self.loss_each_step = self.loss_function(updates[:, :, k], y[:, :, k], k)
+            val_preds_step.append(self.pred_moment_norm.cpu().numpy())
             self.cumulative_loss = self.cumulative_loss + self.loss_each_step
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k], k)
 
         self.log("val_loss", self.cumulative_loss.reshape(1, 1))
-        return self.cumulative_loss
+
+        val_preds_step = np.asarray(val_preds_step, dtype=np.float64)
+        val_preds_step = np.moveaxis(val_preds_step, 0, -1)
+
+        return val_preds_step
+
+    def validation_epoch_end(self, validation_step_outputs):
+        try:
+            assert self.single_sim_num is not None
+            self.val_preds = np.vstack(validation_step_outputs)
+            self.val_y = np.vstack(self.val_y)
+            for k in range(self.step_size):
+                fig, figname = self._plot_val_outputs(
+                    self.val_y[:, :, k], self.val_preds[:, :, k]
+                )
+
+                self.logger.experiment.add_figure(
+                    figname + ": Step  " + str(k+1), fig, self.global_step
+                )
+
+            self.val_y = []
+        except:
+            pass
 
     def test_step(self, initial_moments):
         """For moment-wise evaluation as used for ODE solve"""
@@ -187,15 +228,16 @@ class LightningModel(pl.LightningModule):
 
             if (self.global_step % 2000) == 0:
                 fig, figname = self.plot_preds()
-                self.logger.experiment.add_figure(figname + ": Step  " + str(k), fig, self.global_step)
+                self.logger.experiment.add_figure(
+                    figname + ": Step  " + str(k), fig, self.global_step
+                )
 
         if k < self.step_size - 1:
             """A new x is calculated at every step. Takes moments as calculated
             from NN outputs (pred_moment_norm) along with other paramters
             that are fed as inputs to the network (pred_moment)"""
 
-            
-            self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
+            # self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
             new_x = torch.empty_like(self.x)
             tau = self.pred_moment[:, 2] / (
                 self.pred_moment[:, 2] + self.pred_moment[:, 0]
@@ -222,5 +264,36 @@ class LightningModel(pl.LightningModule):
             plt.tight_layout()
 
         figname = "Mc-Snow vs ML"
+
+        return fig, figname
+
+    def _plot_all_moments(self, y, k):
+
+        loss_lc = self.criterion(self.pred_moment_norm[:, 0], y[:, 0])
+
+        loss_nc = self.criterion(self.pred_moment_norm[:, 1], y[:, 1])
+        loss_lr = self.criterion(self.pred_moment_norm[:, 2], y[:, 2])
+        loss_nr = self.criterion(self.pred_moment_norm[:, 3], y[:, 3])
+
+        self.logger.experiment.add_scalars(
+            "Loss_step_" + str(k),
+            {"Lc": loss_lc, "Nc": loss_nc, "Lr": loss_lr, "Nr": loss_nr},
+            global_step=self.global_step,
+        )
+
+    def _plot_val_outputs(self, stacked_y, all_preds):
+        delta = stacked_y - all_preds
+        time = np.arange(delta.shape[0])
+        sns.set_theme(style="darkgrid")
+        fig = plt.figure(figsize=(15, 12))
+        for i in range(4):
+            ax = fig.add_subplot(2, 2, i + 1)
+            plt.plot(time, delta[:, i], color=self.color[i])
+            plt.title(self.var[i])
+            plt.ylabel("Real Moments - Predicted Moments (Norm)")
+            plt.xlabel("Time")
+            plt.tight_layout()
+
+        figname = "Residuals"
 
         return fig, figname
