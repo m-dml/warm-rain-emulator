@@ -189,7 +189,7 @@ class LightningModel(pl.LightningModule):
 
         self.log("val_loss", self.cumulative_loss.reshape(1, 1))
 
-        val_preds_step = np.asarray(val_preds_step, dtype=np.float64)
+        val_preds_step = np.asarray(val_preds_step)
         val_preds_step = np.moveaxis(val_preds_step, 0, -1)
 
         return {'outs':val_preds_step, 'y':y.cpu().numpy()}
