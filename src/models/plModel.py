@@ -195,6 +195,7 @@ class LightningModel(pl.LightningModule):
         return {'outs':val_preds_step, 'y':y.cpu().numpy()}
 
     def validation_epoch_end(self, validation_step_outputs):
+        #validation_step_outputs is a list of dictionaries
         try:
             assert self.single_sim_num is not None
             outs_list=[]
@@ -206,8 +207,8 @@ class LightningModel(pl.LightningModule):
                     preds_list.append(v)
                     
             self.val_preds = np.vstack(preds_list)
-            
             self.val_y = np.vstack(outs_list)
+            """Now we have stacked outputs and predictions, no shuffle hence no rearrangement needed """
             for k in range(self.step_size):
                 fig, figname = self._plot_val_outputs(
                     self.val_y[:, :, k], self.val_preds[:, :, k]
