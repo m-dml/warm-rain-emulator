@@ -70,8 +70,7 @@ class LightningModel(pl.LightningModule):
         self.updates_mean = torch.from_numpy(updates_mean).float().to("cuda")
         self.inputs_mean = torch.from_numpy(inputs_mean).float().to("cuda")
         self.inputs_std = torch.from_numpy(inputs_std).float().to("cuda")
-        self.val_preds = self.val_y = []
-        self.train_preds = self.train_y = []
+      
 
         # Some plotting stuff
         self.color = ["#26235b", "#bc473a", "#812878", "#f69824"]
@@ -149,9 +148,6 @@ class LightningModel(pl.LightningModule):
         y = x + updates*20"""
 
         self.x, updates, y = batch
-        print(y.cpu().numpy().shape)
-
-        self.val_y.append(y.cpu().numpy())
         self.x = self.x.squeeze()
 
         self.loss_each_step = self.cumulative_loss = torch.tensor(
@@ -176,7 +172,6 @@ class LightningModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         self.x, updates, y = batch
-        # self.val_y.append(y.cpu().numpy())
         self.x = self.x.squeeze()
 
         self.loss_each_step = self.cumulative_loss = torch.tensor(
@@ -197,13 +192,22 @@ class LightningModel(pl.LightningModule):
         val_preds_step = np.asarray(val_preds_step, dtype=np.float64)
         val_preds_step = np.moveaxis(val_preds_step, 0, -1)
 
-        return val_preds_step
+        return {'outs':val_preds_step, 'y':y.cpu().numpy()}
 
     def validation_epoch_end(self, validation_step_outputs):
         try:
             assert self.single_sim_num is not None
-            self.val_preds = np.vstack(validation_step_outputs)
-            self.val_y = np.vstack(self.val_y)
+            outs_list=[]
+            preds_list=[]
+            for k, v in [(k, v) for x in validation_step_outputs for (k, v) in x.items()]:
+                if k == 'outs':
+                    outs_list.append(v)
+                else:
+                    preds_list.append(v)
+                    
+            self.val_preds = np.vstack(preds_list)
+            
+            self.val_y = np.vstack(outs_list)
             for k in range(self.step_size):
                 fig, figname = self._plot_val_outputs(
                     self.val_y[:, :, k], self.val_preds[:, :, k]
@@ -213,7 +217,6 @@ class LightningModel(pl.LightningModule):
                     figname + ": Step  " + str(k+1), fig, self.global_step
                 )
 
-            self.val_y = []
         except:
             pass
 
