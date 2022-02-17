@@ -70,7 +70,6 @@ class LightningModel(pl.LightningModule):
         self.updates_mean = torch.from_numpy(updates_mean).float().to("cuda")
         self.inputs_mean = torch.from_numpy(inputs_mean).float().to("cuda")
         self.inputs_std = torch.from_numpy(inputs_std).float().to("cuda")
-      
 
         # Some plotting stuff
         self.color = ["#26235b", "#bc473a", "#812878", "#f69824"]
@@ -192,30 +191,32 @@ class LightningModel(pl.LightningModule):
         val_preds_step = np.asarray(val_preds_step)
         val_preds_step = np.moveaxis(val_preds_step, 0, -1)
 
-        return {'outs':val_preds_step, 'y':y.cpu().numpy()}
+        return {"preds": val_preds_step, "y": y.cpu().numpy()}
 
     def validation_epoch_end(self, validation_step_outputs):
-        #validation_step_outputs is a list of dictionaries
+        # validation_step_outputs is a list of dictionaries
         try:
             assert self.single_sim_num is not None
-            outs_list=[]
-            preds_list=[]
-            for k, v in [(k, v) for x in validation_step_outputs for (k, v) in x.items()]:
-                if k == 'outs':
-                    outs_list.append(v)
-                else:
+            outs_list = []
+            preds_list = []
+            for k, v in [
+                (k, v) for x in validation_step_outputs for (k, v) in x.items()
+            ]:
+                if k == "preds":
                     preds_list.append(v)
-                    
+                else:
+                    outs_list.append(v)
+
             self.val_preds = np.vstack(preds_list)
             self.val_y = np.vstack(outs_list)
             """Now we have stacked outputs and predictions, no shuffle hence no rearrangement needed """
             for k in range(self.step_size):
                 fig, figname = self._plot_val_outputs(
-                    self.val_y[:, :, k], self.val_preds[:, :, k]
+                    self.val_y[:, :, k], self.val_preds[:, :, k], k
                 )
 
                 self.logger.experiment.add_figure(
-                    figname + ": Step  " + str(k+1), fig, self.global_step
+                    figname + ": Step  " + str(k + 1), fig, self.global_step
                 )
 
         except:
@@ -254,7 +255,7 @@ class LightningModel(pl.LightningModule):
             new_x[:, 6:] = self.x[:, 6:]
             self.x = new_x
 
-    def plot_preds(self):
+    def plot_preds(self, k=None):
         x = self.real_x[:, : self.out_features].cpu().detach().numpy()
         y = self.pred_moment.cpu().detach().numpy()
         sns.set_theme(style="darkgrid")
@@ -271,7 +272,7 @@ class LightningModel(pl.LightningModule):
 
         return fig, figname
 
-    def _plot_all_moments(self, y, k):
+    def _plot_all_moments(self, y):
 
         loss_lc = self.criterion(self.pred_moment_norm[:, 0], y[:, 0])
 
@@ -285,7 +286,7 @@ class LightningModel(pl.LightningModule):
             global_step=self.global_step,
         )
 
-    def _plot_val_outputs(self, stacked_y, all_preds):
+    def _plot_val_outputs(self, stacked_y, all_preds, k):
         delta = stacked_y - all_preds
         time = np.arange(delta.shape[0])
         sns.set_theme(style="darkgrid")
@@ -297,6 +298,7 @@ class LightningModel(pl.LightningModule):
             plt.ylabel("Real Moments - Predicted Moments (Norm)")
             plt.xlabel("Time")
             plt.tight_layout()
+            plt.suptitle("Residuals at step " + str(k + 1))
 
         figname = "Residuals"
 
