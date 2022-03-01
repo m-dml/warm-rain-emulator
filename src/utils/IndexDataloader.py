@@ -13,8 +13,21 @@ class my_dataset(Dataset):
         self.step_size = step_size
         self.moment_scheme = moment_scheme
 
+        """The following code differentiates between two modes of running this code:
+           with masked arrays or arrays"""
+        try:
+            assert isinstance(self.inputdata, np.ndarray)
+        except:
+            self.inputdata = inputdata
+            self.tend = tend
+            self.outputs = outputs
+        assert isinstance(self.inputdata, np.ndarray) and isinstance(self.tend, np.ndarray) and isinstance(self.outputs, np.ndarray)
+            
+        
+
     def __getitem__(self, index):
         i_time, i_ic, i_repeat = self.index_arr[index]
+        
         tend_multistep = np.empty(
             (self.moment_scheme * 2, self.step_size)
         )  # tendencies
@@ -22,9 +35,11 @@ class my_dataset(Dataset):
             (self.moment_scheme * 2, self.step_size)
         )  # outputs (moments)
         for i_step in range(self.step_size):
+            
             tend_multistep[:, i_step] = self.tend[i_time + i_step, i_ic, i_repeat]
+            
             outputs_multistep[:, i_step] = self.outputs[i_time + i_step, i_ic, i_repeat]
-
+        
         return (
             torch.from_numpy(self.inputdata[i_time, i_ic, i_repeat])
             .view(-1, 1)
@@ -32,7 +47,7 @@ class my_dataset(Dataset):
             torch.from_numpy(tend_multistep).view(-1, self.step_size).float(),
             torch.from_numpy(outputs_multistep).view(-1, self.step_size).float(),
         )
-
+       
     def __len__(self):
         return self.index_arr.shape[0]
 
@@ -44,6 +59,7 @@ def normalize_data(x):
     x_ = x.reshape(-1, x.shape[-1])
     m = x_.mean(axis=0)
     s = x_.std(axis=0)
+    s[s == 0] = 1
     return (x - m) / s, m, s
 
 
@@ -76,7 +92,7 @@ class DataModule(pl.LightningDataModule):
         """
         super().__init__()
 
-        self.data_dir = "/gpfs/work/sharmas/mc-snow-data/"
+        self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.moment_scheme = moment_scheme
@@ -92,14 +108,21 @@ class DataModule(pl.LightningDataModule):
             All the array are of the shape:
             (Time,initial_cond (tot 819),no of sim runs,[inputs/outputs/updates])
             """
-            with np.load(self.data_dir + "/inputs_all.npz") as npz:
-                self.inputs_arr = np.ma.MaskedArray(**npz)
+            try:
+                with np.load(self.data_dir + "/inputs_all.npz") as npz:
+                    self.inputs_arr = np.ma.MaskedArray(**npz)
 
-            with np.load(self.data_dir + "/outputs_all.npz") as npz:
-                self.outputs_arr = np.ma.MaskedArray(**npz)
+                with np.load(self.data_dir + "/outputs_all.npz") as npz:
+                    self.outputs_arr = np.ma.MaskedArray(**npz)
 
-            with np.load(self.data_dir + "/tendencies.npz") as npz:
-                self.tend_arr = np.ma.MaskedArray(**npz)
+                with np.load(self.data_dir + "/tendencies.npz") as npz:
+                    self.tend_arr = np.ma.MaskedArray(**npz)
+
+            except:
+                self.inputs_arr = np.load(data_dir + "/inputs_all.npy")
+                self.outputs_arr = np.load(data_dir + "/outputs_all.npy")
+                self.tend_arr = np.load(data_dir + "/tendencies.npy")
+                
 
         else:
             raise ValueError(
@@ -127,7 +150,6 @@ class DataModule(pl.LightningDataModule):
         """Create an array of indices such that col1, col2,col3: Time, ic_sim, sim_no"""
         l_in = self.calc_index_array_size()
         self.indices_arr = np.empty((l_in * self.sim_num, 3), dtype=np.int)
-
         lo = 0
 
         sim_nums = np.arange(self.sim_num)
@@ -175,15 +197,15 @@ class DataModule(pl.LightningDataModule):
             self.sim_num = 1
 
         if self.single_sim_num:
-            self.inputs_arr = np.expand_dims(
-                self.inputs_arr[:, self.single_sim_num, :, :], axis=1
-            )
-            self.outputs_arr = np.expand_dims(
-                self.outputs_arr[:, self.single_sim_num, :, :], axis=1
-            )
-            self.tend_arr = np.expand_dims(
-                self.tend_arr[:, self.single_sim_num, :, :], axis=1
-            )
+            # self.inputs_arr = np.expand_dims(
+            #     self.inputs_arr[:, self.single_sim_num, :, :], axis=1
+            # )
+            # self.outputs_arr = np.expand_dims(
+            #     self.outputs_arr[:, self.single_sim_num, :, :], axis=1
+            # )
+            # self.tend_arr = np.expand_dims(
+            #     self.tend_arr[:, self.single_sim_num, :, :], axis=1
+            # )
 
             self.tot_len = 1
 
@@ -199,13 +221,16 @@ class DataModule(pl.LightningDataModule):
         )
 
         # Creating data indices for training and validation splits:
+        if self.single_sim_num:
+            self.train_size = 1
+            self.train_dataset = self.val_dataset = self.dataset
 
-        train_size = int(self.train_size * self.dataset.__len__())
-        val_size = self.dataset.__len__() - train_size
-
-        self.train_dataset, self.val_dataset = torch.utils.data.random_split(
-            self.dataset, [train_size, val_size]
-        )
+        else:
+            train_size = int(self.train_size * self.dataset.__len__())
+            val_size = self.dataset.__len__() - train_size
+            self.train_dataset, self.val_dataset = torch.utils.data.random_split(
+                self.dataset, [train_size, val_size]
+            )
 
         print("Train Test Val Split Done")
 
