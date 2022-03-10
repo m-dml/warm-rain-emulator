@@ -1,12 +1,20 @@
-import os
 import numpy as np
 import torch
 from torch import nn
-import sys
+
 
 
 class simulation_forecast:
-    def __init__(self, arr, new_model, sim_number, inputs_mean, inputs_std,updates_mean, updates_std):
+    def __init__(
+        self,
+        arr,
+        new_model,
+        sim_number,
+        inputs_mean,
+        inputs_std,
+        updates_mean,
+        updates_std,
+    ):
         self.arr = arr
         self.sim_number = sim_number
         self.inputs_mean = inputs_mean
@@ -16,6 +24,7 @@ class simulation_forecast:
         self.model = new_model
         self.moment_preds = []
         self.updates_prev = None
+        self.real_updates = []
 
     def setup(self):
 
@@ -23,10 +32,13 @@ class simulation_forecast:
         # self.arr=np.mean(arr[:,:,719:-1,:],axis=-1)
         arr_new = np.delete((arr[:, :, :]), [3, 6], 1)
 
-        k = np.ma.getmask(self.arr)
-        k_new = np.delete((k[:, :, :]), [3, 6], 1)
-        self.test_sims = np.ma.masked_where(k_new, arr_new)
-        print(self.test_sims.shape)
+        if len(arr_new.shape)<4:
+            print("Mask is false")
+            self.test_sims = arr_new 
+        else:
+            k = np.ma.getmask(self.arr)
+            k_new = np.delete((k[:, :, :]), [3, 6], 1)
+            self.test_sims = np.ma.masked_where(k_new, arr_new)
 
     # For testing
     def test(self):
@@ -37,7 +49,7 @@ class simulation_forecast:
         self.create_input()
         predictions_updates = self.model.test_step(torch.from_numpy(self.inputs))
         self.moment_calc(predictions_updates)
-
+        print(np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape)
         for i in range(
             1, np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape[0]
         ):
@@ -55,7 +67,9 @@ class simulation_forecast:
     # For creation of inputs
     def create_input(self):
         tau = self.sim_data[2] / (self.sim_data[2] + self.sim_data[0])
-        xc = self.sim_data[0] / self.sim_data[1]
+
+        xc = self.sim_data[0] / (self.sim_data[1] + 1e-8)
+
         inputs = np.concatenate(
             (
                 self.sim_data[0:4].reshape(1, -1),
@@ -67,13 +81,12 @@ class simulation_forecast:
         )
         # new_input_=np.concatenate((predictions_orig_[:,0:],self.model_params.reshape(1,-1),tau.reshape(1,-1),xc.reshape(1,-1)),axis=1)
 
-        self.inputs = self.calc_mean(
-            inputs, self.inputs_mean, self.inputs_std
-        )
+        self.inputs = self.calc_mean(inputs, self.inputs_mean, self.inputs_std)
         self.inputs = np.float32(self.inputs)
 
     # For checking updates
     def check_updates(self):
+        
         if self.updates[0, 0] > 0:
             self.updates[0, 0] = 0
 
@@ -94,10 +107,7 @@ class simulation_forecast:
         if self.preds[0, 2] > self.model_params[0]:
             self.preds[0, 2] = self.model_params[0]
 
-            # self.preds[0,2] = 0
-
         if self.preds[0, 1] < 0:
-            # self.preds[0,1] = (np.asarray(self.moment_preds).squeeze())[-1,1]
             self.preds[0, 1] = 0
 
         if self.preds[0, 3] < 0:
@@ -113,6 +123,7 @@ class simulation_forecast:
 
         self.preds = self.sim_data[0:4] + (self.updates * 20)
         self.check_preds()
+        # print(self.updates)
         self.moment_preds.append(self.preds)
         self.sim_data = self.preds.reshape(
             -1,
@@ -155,6 +166,7 @@ class SB_forecast:
         self.sim_num = sim_num
 
     def SB_calc(self):
+        print(np.ma.compress_rows(self.test_sims[:, :, self.sim_num]).shape)
         for i in range(
             1, np.ma.compress_rows(self.test_sims[:, :, self.sim_num]).shape[0]
         ):
@@ -180,8 +192,8 @@ class SB_forecast:
             * (nu + 2.0)
             * (nu + 4.0)
             / (nu + 1.0) ** 2
-            * self.lc ** 2
-            * xc ** 2
+            * self.lc**2
+            * xc**2
         )
         tau = self.lr / (self.lc + self.lr + 1e-15)
         taup = np.power(tau, SB_forecast.p_phi)
@@ -196,7 +208,7 @@ class SB_forecast:
 
     def selfcloudSB(self):
 
-        self.scc = SB_forecast.kcc * (self.nu + 2.0) / (self.nu + 1.0) * self.lc ** 2
+        self.scc = SB_forecast.kcc * (self.nu + 2.0) / (self.nu + 1.0) * self.lc**2
 
     def selfrainSB(self):
 
