@@ -105,6 +105,7 @@ class LightningModel(pl.LightningModule):
         )
         (
             self.real_x,
+            self.real_y,
             self.pred_moment,
             self.pred_moment_norm,
         ) = self.norm_obj.calc_preds()
@@ -124,8 +125,8 @@ class LightningModel(pl.LightningModule):
 
             pred_loss = self.criterion(self.pred_moment_norm, y)
             try:
-                assert (self.training is True) and (self.global_step % 10 == 0)
-                assert k is not None and self.plot_all_moments is True
+                assert (self.training is True) and self.plot_all_moments is True
+                #assert k is not None and (self.global_step % 10 == 0)
                 self._plot_all_moments(y, k)
             except:
                 pass
@@ -181,7 +182,7 @@ class LightningModel(pl.LightningModule):
             self.forward()
             assert self.updates is not None
             self.loss_each_step = self.loss_function(updates[:, :, k], y[:, :, k], k)
-            val_preds_step.append(self.pred_moment_norm.cpu().numpy())
+            val_preds_step.append(self.pred_moment.cpu().numpy())
             self.cumulative_loss = self.cumulative_loss + self.loss_each_step
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k], k)
@@ -191,7 +192,7 @@ class LightningModel(pl.LightningModule):
         val_preds_step = np.asarray(val_preds_step)
         val_preds_step = np.moveaxis(val_preds_step, 0, -1)
 
-        return {"preds": val_preds_step, "y": y.cpu().numpy()}
+        return {"preds": val_preds_step, "y": self.real_y.cpu().numpy()}
 
     def validation_epoch_end(self, validation_step_outputs):
         # validation_step_outputs is a list of dictionaries
