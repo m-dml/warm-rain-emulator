@@ -16,7 +16,7 @@ class LightningModel(pl.LightningModule):
         updates_std,
         inputs_mean,
         inputs_std,
-        data_dir="/gpfs/work/sharmas/mc-snow-data/",
+        save_dir="/gpfs/work/sharmas/mc-snow-data/new_exp",
         batch_size=256,
         beta=0.35,
         learning_rate=2e-4,
@@ -44,6 +44,7 @@ class LightningModel(pl.LightningModule):
         super().__init__()
         self.moment_scheme = moment_scheme
         self.out_features = moment_scheme * 2
+        self.save_dir = save_dir
         self.lr = learning_rate
         self.loss_func = loss_func
         self.beta = beta
@@ -76,14 +77,14 @@ class LightningModel(pl.LightningModule):
         self.var = ["Lc", "Nc", "Lr", "Nr"]
 
         self.model = self.initialization_model(
-            act, n_layers, ns, self.out_features, depth, p, use_batch_norm, use_dropout
+            act, n_layers, ns, self.out_features, depth, p, use_batch_norm, use_dropout, save_dir
         )
 
     @staticmethod
     def initialization_model(
-        act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
+        act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout, save_dir
     ):
-        os.chdir("/gpfs/work/sharmas/mc-snow-data/new_exp")
+        os.chdir(save_dir)
         model = plNetwork(
             act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
         )
@@ -95,6 +96,7 @@ class LightningModel(pl.LightningModule):
         self.norm_obj = normalizer(
             self.updates,
             self.x,
+            self.y,
             self.updates_mean,
             self.updates_std,
             self.inputs_mean,
@@ -124,22 +126,21 @@ class LightningModel(pl.LightningModule):
         if self.loss_absolute:
 
             pred_loss = self.criterion(self.pred_moment_norm, y)
-            try:
-                assert (self.training is True) and self.plot_all_moments is True
-                #assert k is not None and (self.global_step % 10 == 0)
-                self._plot_all_moments(y, k)
-            except:
-                pass
-
+            if (self.training is True) and self.plot_all_moments is True:
+                self._plot_all_moments(y,k)
+       
         else:
             pred_loss = self.criterion(updates, self.updates)
 
         return pred_loss
-
+    
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,patience=20)
+            return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+          
 
-        return optimizer
+
 
     def training_step(self, batch, batch_idx):
 
@@ -154,7 +155,7 @@ class LightningModel(pl.LightningModule):
             (0.0), dtype=torch.float32, device=self.device
         )
         for k in range(self.step_size):
-
+            self.y=y[:,:,k].squeeze()
             self.forward()
 
             assert self.updates is not None
@@ -172,6 +173,7 @@ class LightningModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         self.x, updates, y = batch
+       
         self.x = self.x.squeeze()
 
         self.loss_each_step = self.cumulative_loss = torch.tensor(
@@ -179,6 +181,7 @@ class LightningModel(pl.LightningModule):
         )
         val_preds_step = []
         for k in range(self.step_size):
+            self.y=y[:,:,k].squeeze()
             self.forward()
             assert self.updates is not None
             self.loss_each_step = self.loss_function(updates[:, :, k], y[:, :, k], k)
@@ -192,7 +195,7 @@ class LightningModel(pl.LightningModule):
         val_preds_step = np.asarray(val_preds_step)
         val_preds_step = np.moveaxis(val_preds_step, 0, -1)
 
-        return {"preds": val_preds_step, "y": self.real_y.cpu().numpy()}
+        return {"preds": val_preds_step, "y": y.cpu().numpy()}
 
     def validation_epoch_end(self, validation_step_outputs):
         # validation_step_outputs is a list of dictionaries
@@ -259,6 +262,7 @@ class LightningModel(pl.LightningModule):
     def plot_preds(self, k=None):
         x = self.real_x[:, : self.out_features].cpu().detach().numpy()
         y = self.pred_moment.cpu().detach().numpy()
+        
         sns.set_theme(style="darkgrid")
         fig = plt.figure(figsize=(15, 12))
         for i in range(4):
@@ -273,7 +277,7 @@ class LightningModel(pl.LightningModule):
 
         return fig, figname
 
-    def _plot_all_moments(self, y):
+    def _plot_all_moments(self, y, k):
 
         loss_lc = self.criterion(self.pred_moment_norm[:, 0], y[:, 0])
 
@@ -282,12 +286,13 @@ class LightningModel(pl.LightningModule):
         loss_nr = self.criterion(self.pred_moment_norm[:, 3], y[:, 3])
 
         self.logger.experiment.add_scalars(
-            "Loss_step_" + str(k),
+            "Loss_step_" + str(k+1),
             {"Lc": loss_lc, "Nc": loss_nc, "Lr": loss_lr, "Nr": loss_nr},
             global_step=self.global_step,
         )
 
     def _plot_val_outputs(self, stacked_y, all_preds, k):
+        stacked_y = (stacked_y * self.inputs_std[:self.out_features].cpu().detach().numpy()) + self.inputs_mean[:self.out_features].cpu().detach().numpy()
         delta = stacked_y - all_preds
         time = np.arange(delta.shape[0])
         sns.set_theme(style="darkgrid")
