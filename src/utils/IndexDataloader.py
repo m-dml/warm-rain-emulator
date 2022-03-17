@@ -107,6 +107,8 @@ class DataModule(pl.LightningDataModule):
             """
             All the array are of the shape:
             (Time,initial_cond (tot 819),no of sim runs,[inputs/outputs/updates])
+            if in case avg data being loaded, then shape:
+            (Time, IC, 1, [inputs/outputs/updates])
             """
             try:
                 with np.load(self.data_dir + "/inputs_all.npz") as npz:
@@ -122,13 +124,17 @@ class DataModule(pl.LightningDataModule):
                 self.inputs_arr = np.load(data_dir + "/inputs_all.npy")
                 self.outputs_arr = np.load(data_dir + "/outputs_all.npy")
                 self.tend_arr = np.load(data_dir + "/tendencies.npy")
-                
+                #Modify Lo
+                sim_lo = self.inputs_arr[:,0,:,0] + self.inputs_arr[:,0,:,2]
+                self.inputs_arr[:,0,:,-3] = sim_lo
+                print("Modified Lo")
 
         else:
             raise ValueError(
                 "Function needs to be called for calculating values from raw data!"
             )
 
+            
     def setup(self):
         self.calc_norm()
         self.calc_index_array()
