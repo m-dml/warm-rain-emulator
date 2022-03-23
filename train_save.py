@@ -1,16 +1,12 @@
 import os
 import sys
-
-import numpy as np
-import torch
-from torch import nn
 from pytorch_lightning.callbacks import ModelCheckpoint
 from src.models.plModel import LightningModel
+#from src.utils.ListDataloader import DataModule
 from src.utils.IndexDataloader import DataModule
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning import Trainer
-import os
+import torch
 from omegaconf import OmegaConf
 
 
@@ -38,16 +34,20 @@ def cli_main():
     N_EPOCHS = config.max_epochs
 
     data_module = DataModule(
+        data_dir=config.data_dir,
         batch_size=config.batch_size,
         tot_len=config.tot_len,
-        sim_num=config.sim_num,
         step_size=config.step_size,
         moment_scheme=config.moment_scheme,
+        single_sim_num=config.single_sim_num,
+        avg_dataloader=config.avg_dataloader,
+        
     )
     data_module.setup()
     # setting up the model:
 
     pl_model = LightningModel(
+        save_dir=config.save_dir,
         updates_mean=data_module.updates_mean,
         updates_std=data_module.updates_std,
         inputs_mean=data_module.inputs_mean,
@@ -62,28 +62,30 @@ def cli_main():
         n_layers=config.n_layers,
         ns=config.ns,
         loss_absolute=config.loss_absolute,
-        mass_cons_loss_updates=config.mass_cons_loss_updates,
-        mass_cons_loss_moments=config.mass_cons_loss_moments,
+        mass_cons_updates=config.mass_cons_updates,
+        mass_cons_moments=config.mass_cons_moments,
         hard_constraints_updates=config.hard_constraints_updates,
         hard_constraints_moments=config.hard_constraints_moments,
         multi_step=config.multi_step,
         step_size=config.step_size,
         moment_scheme=config.moment_scheme,
         use_batch_norm=config.use_batch_norm,
+        use_dropout=config.use_dropout,
+        single_sim_num=config.single_sim_num,
+        avg_dataloader=config.avg_dataloader,
     )
 
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss", save_top_k=1, mode="min", save_last=True
     )
 
-    # early_stop = EarlyStopping(monitor="val_loss", patience=10, verbose=True)
+    early_stop = EarlyStopping(monitor="val_loss", patience=20, verbose=True)
 
     trainer = pl.Trainer(
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, early_stop],
         gpus=GPUS,
         max_epochs=N_EPOCHS,
-        num_sanity_val_steps=0,
-    )
+        num_sanity_val_steps=0)
 
     trainer.fit(pl_model, data_module)
 
