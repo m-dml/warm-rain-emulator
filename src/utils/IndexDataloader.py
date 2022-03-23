@@ -227,7 +227,7 @@ class DataModule(pl.LightningDataModule):
         )
 
         # Creating data indices for training and validation splits:
-        if self.single_sim_num:
+        if self.single_sim_num is not None:
             self.train_size = 1
             self.train_dataset = self.val_dataset = self.dataset
 
