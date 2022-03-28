@@ -7,8 +7,7 @@ from src.models.nnmodel import plNetwork
 from matplotlib import pyplot as plt
 import seaborn as sns
 from src.helpers.normalizer import normalizer
-from src.helpers.plotting import plot_simulation, calc_errors
-from src.solvers.ode import simulation_forecast, SB_forecast
+
 
 
 class LightningModel(pl.LightningModule):
@@ -90,21 +89,8 @@ class LightningModel(pl.LightningModule):
             save_dir,
         )
 
-        self.all_arr, self.arr = self.load_array(
-            single_sim_num
-        )  # Added for laoding array for ODE plotting
 
-    def load_array(single_sim_num):
-        try:
-            assert single_sim_num is not None
-            all_arr = np.load("/gpfs/work/sharmas/mc-snow-data/sim_100_data.npy")
-            arr = np.mean(all_arr[:, :, :], axis=-1)
-            arr = np.expand_dims(arr, axis=-1)
-            all_arr = np.expand_dims(all_arr, axis=2)
-            return all_arr, arr
-        except:
-            pass
-
+        
     @staticmethod
     def initialization_model(
         act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout, save_dir
@@ -225,32 +211,32 @@ class LightningModel(pl.LightningModule):
 
     def validation_epoch_end(self, validation_step_outputs):
         # validation_step_outputs is a list of dictionaries
-        try:
-            assert self.single_sim_num is not None
-            outs_list = []
-            preds_list = []
-            for k, v in [
-                (k, v) for x in validation_step_outputs for (k, v) in x.items()
-            ]:
-                if k == "preds":
-                    preds_list.append(v)
-                else:
-                    outs_list.append(v)
+        
+        assert self.single_sim_num is not None
+        outs_list = []
+        preds_list = []
+        for k, v in [
+            (k, v) for x in validation_step_outputs for (k, v) in x.items()
+        ]:
+            if k == "preds":
+                preds_list.append(v)
+            else:
+                outs_list.append(v)
 
-            self.val_preds = np.vstack(preds_list)
-            self.val_y = np.vstack(outs_list)
-            """Now we have stacked outputs and predictions, no shuffle hence no rearrangement needed """
-            for k in range(self.step_size):
-                fig, figname = self._plot_val_outputs(
-                    self.val_y[:, :, k], self.val_preds[:, :, k], k
-                )
+        self.val_preds = np.vstack(preds_list)
+        self.val_y = np.vstack(outs_list)
+        """Now we have stacked outputs and predictions, no shuffle hence no rearrangement needed """
+        for k in range(self.step_size):
+            fig, figname = self._plot_val_outputs(
+                self.val_y[:, :, k], self.val_preds[:, :, k], k
+            )
 
-                self.logger.experiment.add_figure(
-                    figname + ": Step  " + str(k + 1), fig, self.global_step
-                )
-            self._plot_ode_solve()
-        except:
-            pass
+            self.logger.experiment.add_figure(
+                figname + ": Step  " + str(k + 1), fig, self.global_step
+            )
+        # self._plot_ode_solve()
+        # except:
+        #     pass
 
     def test_step(self, initial_moments):
 
@@ -340,31 +326,32 @@ class LightningModel(pl.LightningModule):
 
         return fig, figname
 
-    def _plot_ode_solve(self):
-        assert self.single_sim_num is not None
-        sim_num = 0
-        new_forecast = simulation_forecast(
-            self.arr,
-            self.model,
-            sim_num,
-            self.inputs_mean,
-            self.inputs_std,
-            self.updates_mean,
-            self.updates_std,
-        )
+    # def _plot_ode_solve(self):
+    #     #assert self.single_sim_num is not None
+    #     sim_num = 0
+    #     new_forecast = simulation_forecast(
+    #         self.arr,
+    #         self.model,
+    #         sim_num,
+    #         self.inputs_mean.cpu().detach().numpy(),
+    #         self.inputs_std.cpu().detach().numpy(),
+    #         self.updates_mean.cpu().detach().numpy(),
+    #         self.updates_std.cpu().detach().numpy(),
+    #     )
 
-        new_forecast.test()
+    #     new_forecast.test()
 
-        sb_forecast = SB_forecast(self.arr, sim_num)
-        sb_forecast.SB_calc()
-        predictions_sb = np.asarray(sb_forecast.predictions).reshape(-1, 4)
-        var_all = np.transpose(calc_errors(self.all_arr, sim_num))
-        fig, figname = plot_simulation(
-            np.asarray(new_forecast.moment_preds).reshape(-1, 4),
-            new_forecast.orig,
-            predictions_sb,
-            var_all,
-            new_forecast.model_params,
-            num=100,
-        )
-        self.logger.experiment.add_figure(figname, fig, self.global_step)
+    #     sb_forecast = SB_forecast(self.arr, sim_num)
+    #     sb_forecast.SB_calc()
+    #     predictions_sb = np.asarray(sb_forecast.predictions).reshape(-1, 4)
+    #     var_all = np.transpose(calc_errors(self.all_arr, sim_num))
+    #     fig= plot_simulation(
+    #         np.asarray(new_forecast.moment_preds).reshape(-1, 4),
+    #         new_forecast.orig,
+    #         predictions_sb,
+    #         var_all,
+    #         new_forecast.model_params,
+    #         num=100,
+    #     )
+    #     figname = "ODE Solutions"
+    #     self.logger.experiment.add_figure(figname, fig, self.global_step)

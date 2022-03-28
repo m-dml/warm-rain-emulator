@@ -1,13 +1,17 @@
 import os
 import sys
+import numpy as np
 from pytorch_lightning.callbacks import ModelCheckpoint
 from src.models.plModel import LightningModel
-#from src.utils.ListDataloader import DataModule
 from src.utils.IndexDataloader import DataModule
+from src.helpers.plotting import plot_simulation, calc_errors
+from src.solvers.ode import simulation_forecast, SB_forecast
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 import torch
 from omegaconf import OmegaConf
+
+from torch.utils.tensorboard import SummaryWriter
 
 
 if len(sys.argv) > 1:
@@ -31,7 +35,7 @@ GPUS = 1
 
 def cli_main():
     pl.seed_everything(42)
-    N_EPOCHS = config.max_epochs
+    N_EPOCHS = 2#config.max_epochs
 
     data_module = DataModule(
         data_dir=config.data_dir,
@@ -91,8 +95,56 @@ def cli_main():
 
     return data_module, pl_model, trainer
 
+def load_array():
+    
+    all_arr = np.load("/gpfs/work/sharmas/mc-snow-data/sim_100_data.npy")
+    arr = np.mean(all_arr[:, :, :], axis=-1)
+    arr = np.expand_dims(arr, axis=-1)
+    all_arr = np.expand_dims(all_arr, axis=2)
+    return all_arr, arr
+    
 
 if __name__ == "__main__":
     config = load_config(file_name + ".yaml")
 
     _dm, _model, _trainer = cli_main()
+
+    try:
+        assert config.single_sim_num is not None
+        all_arr, arr = load_array()
+
+        print("Loaded Data")
+        #Plotting done here
+        sim_num = 0
+        new_forecast = simulation_forecast(
+            arr,
+            _model,
+            sim_num,
+            _dm.inputs_mean,
+            _dm.inputs_std,
+            _dm.updates_mean,
+            _dm.updates_std,
+        )
+
+        new_forecast.test()
+
+        sb_forecast = SB_forecast(arr, sim_num)
+        sb_forecast.SB_calc()
+        predictions_sb = np.asarray(sb_forecast.predictions).reshape(-1, 4)
+        var_all = np.transpose(calc_errors(all_arr, sim_num))
+        fig= plot_simulation(
+            np.asarray(new_forecast.moment_preds).reshape(-1, 4),
+            new_forecast.orig,
+            predictions_sb,
+            var_all,
+            new_forecast.model_params,
+            num=100,
+        )
+        figname = "ODE Solutions"
+        dir_name =   "/lightning_logs/version_"+ os.environ["SLURM_JOB_ID"]
+        writer = SummaryWriter(log_dir=config.save_dir + dir_name)
+        writer.add_figure(figname, fig)
+        writer.close()
+
+    except:
+        pass
