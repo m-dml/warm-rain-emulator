@@ -7,6 +7,8 @@ from src.models.nnmodel import plNetwork
 from matplotlib import pyplot as plt
 import seaborn as sns
 from src.helpers.normalizer import normalizer
+from src.helpers.plotting import plot_simulation, calc_errors
+from src.solvers.ode import simulation_forecast, SB_forecast
 
 
 class LightningModel(pl.LightningModule):
@@ -77,8 +79,31 @@ class LightningModel(pl.LightningModule):
         self.var = ["Lc", "Nc", "Lr", "Nr"]
 
         self.model = self.initialization_model(
-            act, n_layers, ns, self.out_features, depth, p, use_batch_norm, use_dropout, save_dir
+            act,
+            n_layers,
+            ns,
+            self.out_features,
+            depth,
+            p,
+            use_batch_norm,
+            use_dropout,
+            save_dir,
         )
+
+        self.all_arr, self.arr = self.load_array(
+            single_sim_num
+        )  # Added for laoding array for ODE plotting
+
+    def load_array(single_sim_num):
+        try:
+            assert single_sim_num is not None
+            all_arr = np.load("/gpfs/work/sharmas/mc-snow-data/sim_100_data.npy")
+            arr = np.mean(all_arr[:, :, :], axis=-1)
+            arr = np.expand_dims(arr, axis=-1)
+            all_arr = np.expand_dims(all_arr, axis=2)
+            return all_arr, arr
+        except:
+            pass
 
     @staticmethod
     def initialization_model(
@@ -127,20 +152,21 @@ class LightningModel(pl.LightningModule):
 
             pred_loss = self.criterion(self.pred_moment_norm, y)
             if (self.training is True) and self.plot_all_moments is True:
-                self._plot_all_moments(y,k)
-       
+                self._plot_all_moments(y, k)
+
         else:
             pred_loss = self.criterion(updates, self.updates)
 
         return pred_loss
-    
+
     def configure_optimizers(self):
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,patience=20)
-            return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
-          
-
-
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": scheduler,
+            "monitor": "train_loss",
+        }
 
     def training_step(self, batch, batch_idx):
 
@@ -155,7 +181,7 @@ class LightningModel(pl.LightningModule):
             (0.0), dtype=torch.float32, device=self.device
         )
         for k in range(self.step_size):
-            self.y=y[:,:,k].squeeze()
+            self.y = y[:, :, k].squeeze()
             self.forward()
 
             assert self.updates is not None
@@ -173,7 +199,7 @@ class LightningModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         self.x, updates, y = batch
-       
+
         self.x = self.x.squeeze()
 
         self.loss_each_step = self.cumulative_loss = torch.tensor(
@@ -181,7 +207,7 @@ class LightningModel(pl.LightningModule):
         )
         val_preds_step = []
         for k in range(self.step_size):
-            self.y=y[:,:,k].squeeze()
+            self.y = y[:, :, k].squeeze()
             self.forward()
             assert self.updates is not None
             self.loss_each_step = self.loss_function(updates[:, :, k], y[:, :, k], k)
@@ -222,16 +248,18 @@ class LightningModel(pl.LightningModule):
                 self.logger.experiment.add_figure(
                     figname + ": Step  " + str(k + 1), fig, self.global_step
                 )
-
+            self._plot_ode_solve()
         except:
             pass
 
     def test_step(self, initial_moments):
+
         """For moment-wise evaluation as used for ODE solve"""
         with torch.no_grad():
             preds = self.model(initial_moments.float())
         return preds
 
+    
     def calc_new_x(self, y, k):
         if self.plot_while_training:
 
@@ -262,7 +290,7 @@ class LightningModel(pl.LightningModule):
     def plot_preds(self, k=None):
         x = self.real_x[:, : self.out_features].cpu().detach().numpy()
         y = self.pred_moment.cpu().detach().numpy()
-        
+
         sns.set_theme(style="darkgrid")
         fig = plt.figure(figsize=(15, 12))
         for i in range(4):
@@ -286,13 +314,15 @@ class LightningModel(pl.LightningModule):
         loss_nr = self.criterion(self.pred_moment_norm[:, 3], y[:, 3])
 
         self.logger.experiment.add_scalars(
-            "Loss_step_" + str(k+1),
+            "Loss_step_" + str(k + 1),
             {"Lc": loss_lc, "Nc": loss_nc, "Lr": loss_lr, "Nr": loss_nr},
             global_step=self.global_step,
         )
 
     def _plot_val_outputs(self, stacked_y, all_preds, k):
-        stacked_y = (stacked_y * self.inputs_std[:self.out_features].cpu().detach().numpy()) + self.inputs_mean[:self.out_features].cpu().detach().numpy()
+        stacked_y = (
+            stacked_y * self.inputs_std[: self.out_features].cpu().detach().numpy()
+        ) + self.inputs_mean[: self.out_features].cpu().detach().numpy()
         delta = stacked_y - all_preds
         time = np.arange(delta.shape[0])
         sns.set_theme(style="darkgrid")
@@ -309,3 +339,32 @@ class LightningModel(pl.LightningModule):
         figname = "Residuals"
 
         return fig, figname
+
+    def _plot_ode_solve(self):
+        assert self.single_sim_num is not None
+        sim_num = 0
+        new_forecast = simulation_forecast(
+            self.arr,
+            self.model,
+            sim_num,
+            self.inputs_mean,
+            self.inputs_std,
+            self.updates_mean,
+            self.updates_std,
+        )
+
+        new_forecast.test()
+
+        sb_forecast = SB_forecast(self.arr, sim_num)
+        sb_forecast.SB_calc()
+        predictions_sb = np.asarray(sb_forecast.predictions).reshape(-1, 4)
+        var_all = np.transpose(calc_errors(self.all_arr, sim_num))
+        fig, figname = plot_simulation(
+            np.asarray(new_forecast.moment_preds).reshape(-1, 4),
+            new_forecast.orig,
+            predictions_sb,
+            var_all,
+            new_forecast.model_params,
+            num=100,
+        )
+        self.logger.experiment.add_figure(figname, fig, self.global_step)
