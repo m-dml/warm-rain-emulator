@@ -119,16 +119,19 @@ class DataModule(pl.LightningDataModule):
 
                 with np.load(self.data_dir + "/tendencies.npz") as npz:
                     self.tend_arr = np.ma.MaskedArray(**npz)
+                sim_lo = self.inputs_arr[:,:,:,1] + self.inputs_arr[:,:,:,3]
+                self.inputs_arr[:,:,:,-3] = sim_lo
+                print("Modified Lo")
 
             except:
                 self.inputs_arr = np.load(data_dir + "/inputs_all.npy")
                 self.outputs_arr = np.load(data_dir + "/outputs_all.npy")
                 self.tend_arr = np.load(data_dir + "/tendencies.npy")
                 #Modify Lo
+                
                 sim_lo = self.inputs_arr[:,0,:,0] + self.inputs_arr[:,0,:,2]
                 self.inputs_arr[:,0,:,-3] = sim_lo
                 print("Modified Lo")
-
         else:
             raise ValueError(
                 "Function needs to be called for calculating values from raw data!"
