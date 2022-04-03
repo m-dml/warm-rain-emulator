@@ -35,7 +35,7 @@ GPUS = 1
 
 def cli_main():
     pl.seed_everything(42)
-    N_EPOCHS = 2#config.max_epochs
+    N_EPOCHS = config.max_epochs
 
     data_module = DataModule(
         data_dir=config.data_dir,
@@ -83,13 +83,14 @@ def cli_main():
         monitor="val_loss", save_top_k=1, mode="min", save_last=True
     )
 
-    early_stop = EarlyStopping(monitor="val_loss", patience=20, verbose=True)
+    #early_stop = EarlyStopping(monitor="val_loss", patience=20, verbose=True)
 
     trainer = pl.Trainer(
-        callbacks=[checkpoint_callback, early_stop],
+        callbacks=[checkpoint_callback],
         gpus=GPUS,
         max_epochs=N_EPOCHS,
-        num_sanity_val_steps=0)
+        num_sanity_val_steps=0,
+        gradient_clip_val=0.5)
 
     trainer.fit(pl_model, data_module)
 
@@ -109,16 +110,19 @@ if __name__ == "__main__":
 
     _dm, _model, _trainer = cli_main()
 
+    #The code below plots ODE solutions for the trained model
     try:
         assert config.single_sim_num is not None
         all_arr, arr = load_array()
 
         print("Loaded Data")
         #Plotting done here
+        trained_model = _model.load_from_checkpoint (config.save_dir + "/lightning_logs/version_" + os.environ["SLURM_JOB_ID"]+
+                                                  "/checkpoints/last.ckpt")
         sim_num = 0
         new_forecast = simulation_forecast(
             arr,
-            _model,
+            trained_model,
             sim_num,
             _dm.inputs_mean,
             _dm.inputs_std,
@@ -141,7 +145,7 @@ if __name__ == "__main__":
             num=100,
         )
         figname = "ODE Solutions"
-        dir_name =   "/lightning_logs/version_"+ os.environ["SLURM_JOB_ID"]
+        dir_name = "/lightning_logs/version_"+ os.environ["SLURM_JOB_ID"]
         writer = SummaryWriter(log_dir=config.save_dir + dir_name)
         writer.add_figure(figname, fig)
         writer.close()
