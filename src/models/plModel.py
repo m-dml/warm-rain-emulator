@@ -40,6 +40,7 @@ class LightningModel(pl.LightningModule):
         use_dropout=False,
         single_sim_num=None,
         avg_dataloader=False,
+        pretrained_path=None
     ):
         super().__init__()
         self.moment_scheme = moment_scheme
@@ -75,7 +76,7 @@ class LightningModel(pl.LightningModule):
         # Some plotting stuff
         self.color = ["#26235b", "#bc473a", "#812878", "#f69824"]
         self.var = ["Lc", "Nc", "Lr", "Nr"]
-
+        self.pretrained_path = pretrained_path
         self.model = self.initialization_model(
             act,
             n_layers,
@@ -86,16 +87,37 @@ class LightningModel(pl.LightningModule):
             use_batch_norm,
             use_dropout,
             save_dir,
+            pretrained_path,
         )
 
     @staticmethod
     def initialization_model(
-        act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout, save_dir
+        act,
+        n_layers,
+        ns,
+        out_features,
+        depth,
+        p,
+        use_batch_norm,
+        use_dropout,
+        save_dir,
+        pretrained_path,
     ):
         os.chdir(save_dir)
         model = plNetwork(
             act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
         )
+        if pretrained_path is not None:
+            pretrained_dict = torch.load(pretrained_path)
+            new_dict = {}
+
+            for (k, _), (_, v) in zip(
+                model.state_dict().items(), pretrained_dict["state_dict"].items()
+            ):
+                new_dict[k] = v
+            model.load_state_dict(
+                dict([(n, p) for n, p in new_dict.items()]), strict=False
+            )
         model.train()
         return model
 
