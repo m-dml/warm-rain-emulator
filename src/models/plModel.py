@@ -9,7 +9,6 @@ import seaborn as sns
 from src.helpers.normalizer import normalizer
 
 
-
 class LightningModel(pl.LightningModule):
     def __init__(
         self,
@@ -89,8 +88,6 @@ class LightningModel(pl.LightningModule):
             save_dir,
         )
 
-
-        
     @staticmethod
     def initialization_model(
         act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout, save_dir
@@ -142,17 +139,19 @@ class LightningModel(pl.LightningModule):
 
         else:
             pred_loss = self.criterion(updates, self.updates)
-
+        self.check_loss(pred_loss, k)
         return pred_loss
+
+    def check_loss(self, pred_loss, k):
+        if torch.isnan(pred_loss):
+            fig, figname = self.plot_preds()
+            self.logger.experiment.add_figure(
+                figname + ": Step  " + str(k), fig, self.global_step
+            )
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20)
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": scheduler,
-            "monitor": "train_loss",
-        }
+        return optimizer
 
     def training_step(self, batch, batch_idx):
 
@@ -211,32 +210,29 @@ class LightningModel(pl.LightningModule):
 
     def validation_epoch_end(self, validation_step_outputs):
         # validation_step_outputs is a list of dictionaries
-        
-        assert self.single_sim_num is not None
-        outs_list = []
-        preds_list = []
-        for k, v in [
-            (k, v) for x in validation_step_outputs for (k, v) in x.items()
-        ]:
-            if k == "preds":
-                preds_list.append(v)
-            else:
-                outs_list.append(v)
 
-        self.val_preds = np.vstack(preds_list)
-        self.val_y = np.vstack(outs_list)
-        """Now we have stacked outputs and predictions, no shuffle hence no rearrangement needed """
-        for k in range(self.step_size):
-            fig, figname = self._plot_val_outputs(
-                self.val_y[:, :, k], self.val_preds[:, :, k], k
-            )
+        if self.single_sim_num is not None:
+            outs_list = []
+            preds_list = []
+            for k, v in [
+                (k, v) for x in validation_step_outputs for (k, v) in x.items()
+            ]:
+                if k == "preds":
+                    preds_list.append(v)
+                else:
+                    outs_list.append(v)
 
-            self.logger.experiment.add_figure(
-                figname + ": Step  " + str(k + 1), fig, self.global_step
-            )
-        # self._plot_ode_solve()
-        # except:
-        #     pass
+            self.val_preds = np.vstack(preds_list)
+            self.val_y = np.vstack(outs_list)
+            """Now we have stacked outputs and predictions, no shuffle hence no rearrangement needed """
+            for k in range(self.step_size):
+                fig, figname = self._plot_val_outputs(
+                    self.val_y[:, :, k], self.val_preds[:, :, k], k
+                )
+
+                self.logger.experiment.add_figure(
+                    figname + ": Step  " + str(k + 1), fig, self.global_step
+                )
 
     def test_step(self, initial_moments):
 
@@ -245,7 +241,6 @@ class LightningModel(pl.LightningModule):
             preds = self.model(initial_moments.float())
         return preds
 
-    
     def calc_new_x(self, y, k):
         if self.plot_while_training:
 
@@ -274,7 +269,7 @@ class LightningModel(pl.LightningModule):
             self.x = new_x
 
     def plot_preds(self, k=None):
-        x = self.real_x[:, : self.out_features].cpu().detach().numpy()
+        x = self.real_y[:, : self.out_features].cpu().detach().numpy()
         y = self.pred_moment.cpu().detach().numpy()
 
         sns.set_theme(style="darkgrid")
@@ -287,7 +282,7 @@ class LightningModel(pl.LightningModule):
             plt.xlabel("Real Value")
             plt.tight_layout()
 
-        figname = "Mc-Snow vs ML"
+        figname = "Mc-Snow vs ML at NaN"
 
         return fig, figname
 
@@ -325,33 +320,3 @@ class LightningModel(pl.LightningModule):
         figname = "Residuals"
 
         return fig, figname
-
-    # def _plot_ode_solve(self):
-    #     #assert self.single_sim_num is not None
-    #     sim_num = 0
-    #     new_forecast = simulation_forecast(
-    #         self.arr,
-    #         self.model,
-    #         sim_num,
-    #         self.inputs_mean.cpu().detach().numpy(),
-    #         self.inputs_std.cpu().detach().numpy(),
-    #         self.updates_mean.cpu().detach().numpy(),
-    #         self.updates_std.cpu().detach().numpy(),
-    #     )
-
-    #     new_forecast.test()
-
-    #     sb_forecast = SB_forecast(self.arr, sim_num)
-    #     sb_forecast.SB_calc()
-    #     predictions_sb = np.asarray(sb_forecast.predictions).reshape(-1, 4)
-    #     var_all = np.transpose(calc_errors(self.all_arr, sim_num))
-    #     fig= plot_simulation(
-    #         np.asarray(new_forecast.moment_preds).reshape(-1, 4),
-    #         new_forecast.orig,
-    #         predictions_sb,
-    #         var_all,
-    #         new_forecast.model_params,
-    #         num=100,
-    #     )
-    #     figname = "ODE Solutions"
-    #     self.logger.experiment.add_figure(figname, fig, self.global_step)
