@@ -108,7 +108,7 @@ class LightningModel(pl.LightningModule):
             act, n_layers, ns, out_features, depth, p, use_batch_norm, use_dropout
         )
         if pretrained_path is not None:
-            pretrained_dict = torch.load(pretrained_path)
+            pretrained_dict = torch.load(pretrained_path,map_location='cpu')
             new_dict = {}
 
             for (k, _), (_, v) in zip(
