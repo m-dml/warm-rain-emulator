@@ -1,4 +1,6 @@
 import os
+import sys
+import copy
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -6,7 +8,7 @@ import torch.nn as nn
 from src.models.nnmodel import plNetwork
 from matplotlib import pyplot as plt
 import seaborn as sns
-from src.helpers.normalizer import normalizer
+from src.helpers.normalizer_org import normalizer
 
 
 class LightningModel(pl.LightningModule):
@@ -73,6 +75,7 @@ class LightningModel(pl.LightningModule):
         self.inputs_mean = torch.from_numpy(inputs_mean).float().to("cuda")
         self.inputs_std = torch.from_numpy(inputs_std).float().to("cuda")
 
+        self.lo_norm = True
         # Some plotting stuff
         self.color = ["#26235b", "#bc473a", "#812878", "#f69824"]
         self.var = ["Lc", "Nc", "Lr", "Nr"]
@@ -122,7 +125,17 @@ class LightningModel(pl.LightningModule):
         return model
 
     def forward(self):
-        self.updates = self.model(self.x)
+        if self.lo_norm:
+        #normalize wrt Lo
+            Lo = ((self.x[:,-2]* self.inputs_std[-2]) + self.inputs_mean[-2]).reshape(-1,1)
+            #un-normalize Lo
+        
+            self.x_lo = torch.clone(self.x)
+            self.x_lo[:,:4] = self.x[:,:4]/Lo
+            self.updates = self.model(self.x_lo)
+        else:
+             self.updates = self.model(self.x)
+            
         self.norm_obj = normalizer(
             self.updates,
             self.x,
