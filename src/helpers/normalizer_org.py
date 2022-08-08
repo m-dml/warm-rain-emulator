@@ -19,7 +19,7 @@ class normalizer:
         hard_constraints_moments=True,
         mass_cons_moments=True,
         out_features=4,
-        lo_norm
+        lo_norm=True
     ):
 
         self.updates = updates
@@ -48,18 +48,29 @@ class normalizer:
             + self.inputs_mean[: self.out_features]
         )
         if self.lo_norm:
-            #Scaling with respect to the corresponding Lo
-            self.pred_moment = (self.real_x + self.real_updates * 20)*(self.real_x[:,0]+self.real_x[:,2]).reshape(-1,1)
-        else:
-            self.pred_moment = (self.real_x + self.real_updates * 20)
+            #removing Lo norm from real_x values
+            lo = (self.x[:, 4] * self.inputs_std[4:5]) + self.inputs_mean[4:5]
+        
+            self.real_x = self.real_x[:, :4] * lo
             
-        self.pred_moment_norm = (
-            self.pred_moment - self.inputs_mean[: self.out_features]
-        ) / self.inputs_std[: self.out_features]
+        
+            #Scaling with respect to the corresponding Lo
+        self.pred_moment = (self.real_x + self.real_updates * 20)
+           
+        if self.lo_norm:   
+            self.pred_moment =  self.pred_moment/(lo).reshape(-1,1)
+            
+        
+        self.pred_moment_norm = ((
+        self.pred_moment - self.inputs_mean[: self.out_features]) / self.inputs_std[: self.out_features])
+            
         self.real_y = (
             self.y[:, : self.out_features] * self.inputs_std[: self.out_features]
             + self.inputs_mean[: self.out_features]
         )
+        if self.lo_norm:
+            self.real_y[:, : self.out_features] =  self.real_y[:, : self.out_features] * lo.reshape(-1,1)
+            
         return self.real_x, self.real_y, self.pred_moment, self.pred_moment_norm
 
     def set_constraints(self):
