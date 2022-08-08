@@ -1,3 +1,4 @@
+from re import S
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -52,10 +53,11 @@ class my_dataset(Dataset):
         return self.index_arr.shape[0]
 
 
-def normalize_data(x):
+def normalize_data(x, flag = None):
     """
     normalize array by all but the last dimension, return normed vals, means, sds
     """
+   
     x_ = x.reshape(-1, x.shape[-1])
     m = x_.mean(axis=0)
     s = x_.std(axis=0)
@@ -103,6 +105,7 @@ class DataModule(pl.LightningDataModule):
         self.train_size = train_size
         self.single_sim_num = single_sim_num
         self.avg_dataloader = avg_dataloader
+        self.lo_norm = True
         if self.load_simulations:
             """
             All the array are of the shape:
@@ -119,9 +122,12 @@ class DataModule(pl.LightningDataModule):
 
                 with np.load(self.data_dir + "/tendencies.npz") as npz:
                     self.tend_arr = np.ma.MaskedArray(**npz)
-                sim_lo = self.inputs_arr[:,:,:,1] + self.inputs_arr[:,:,:,3]
+
+                
+                sim_lo = self.inputs_arr[:,:,:,0] + self.inputs_arr[:,:,:,2]
                 self.inputs_arr[:,:,:,-3] = sim_lo
-                print("Modified Lo")
+                print("Modified Lo!")
+                
 
             except:
                 self.inputs_arr = np.load(data_dir + "/inputs_all.npy")
@@ -183,6 +189,10 @@ class DataModule(pl.LightningDataModule):
             lo += indices_sim.shape[0]
 
     def calc_norm(self):
+        if self.lo_norm:
+            self.inputs_arr = self.inputs_arr[:, :, :4, :]/self.inputs_arr[:, :, 4, :]
+            self.outputs_arr = self.outputs_arr[:, :, :4, :]/self.inputs_arr[:, :, 4, :] #For loss calculation
+        
         self.inputs_arr, self.inputs_mean, self.inputs_std = normalize_data(
             self.inputs_arr
         )
@@ -192,8 +202,11 @@ class DataModule(pl.LightningDataModule):
         self.tend_arr, self.updates_mean, self.updates_std = normalize_data(
             self.tend_arr
         )
-
+       
+            #self.tend_arr = self.tend_arr[:, :, :, :]/self.inputs_arr[:, :, 4, :]
+            
         if self.avg_dataloader:
+            
             self.inputs_arr = np.expand_dims(
                 np.mean(self.inputs_arr[:, :, :, :], axis=2), axis=2
             )
@@ -205,18 +218,18 @@ class DataModule(pl.LightningDataModule):
             )
             self.sim_num = 1
 
-        if self.single_sim_num:
-            # self.inputs_arr = np.expand_dims(
-            #     self.inputs_arr[:, self.single_sim_num, :, :], axis=1
-            # )
-            # self.outputs_arr = np.expand_dims(
-            #     self.outputs_arr[:, self.single_sim_num, :, :], axis=1
-            # )
-            # self.tend_arr = np.expand_dims(
-            #     self.tend_arr[:, self.single_sim_num, :, :], axis=1
-            # )
+        # if self.single_sim_num:
+        #     # self.inputs_arr = np.expand_dims(
+        #     #     self.inputs_arr[:, self.single_sim_num, :, :], axis=1
+        #     # )
+        #     # self.outputs_arr = np.expand_dims(
+        #     #     self.outputs_arr[:, self.single_sim_num, :, :], axis=1
+        #     # )
+        #     # self.tend_arr = np.expand_dims(
+        #     #     self.tend_arr[:, self.single_sim_num, :, :], axis=1
+        #     # )
 
-            self.tot_len = 1
+        #     self.tot_len = 1
 
     def test_train(self):
 
@@ -230,16 +243,16 @@ class DataModule(pl.LightningDataModule):
         )
 
         # Creating data indices for training and validation splits:
-        if self.single_sim_num is not None:
-            self.train_size = 1
-            self.train_dataset = self.val_dataset = self.dataset
+        # if self.single_sim_num is not None:
+        #     self.train_size = 1
+        #     self.train_dataset = self.val_dataset = self.dataset
 
-        else:
-            train_size = int(self.train_size * self.dataset.__len__())
-            val_size = self.dataset.__len__() - train_size
-            self.train_dataset, self.val_dataset = torch.utils.data.random_split(
-                self.dataset, [train_size, val_size]
-            )
+        # else:
+        train_size = int(self.train_size * self.dataset.__len__())
+        val_size = self.dataset.__len__() - train_size
+        self.train_dataset, self.val_dataset = torch.utils.data.random_split(
+            self.dataset, [train_size, val_size]
+        )
 
         print("Train Test Val Split Done")
 
