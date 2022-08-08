@@ -49,7 +49,7 @@ class normalizer:
         )
         if self.lo_norm:
             #removing Lo norm from real_x values
-            lo = (self.x[:, 4] * self.inputs_std[4:5]) + self.inputs_mean[4:5]
+            lo = (self.x[:, 4:5] * self.inputs_std[4:5]) + self.inputs_mean[4:5]
         
             self.real_x = self.real_x[:, :4] * lo
             

@@ -190,8 +190,8 @@ class DataModule(pl.LightningDataModule):
 
     def calc_norm(self):
         if self.lo_norm:
-            self.inputs_arr = self.inputs_arr[:, :, :4, :]/self.inputs_arr[:, :, 4, :]
-            self.outputs_arr = self.outputs_arr[:, :, :4, :]/self.inputs_arr[:, :, 4, :] #For loss calculation
+            self.inputs_arr = self.inputs_arr[:, :, :4, :]/self.inputs_arr[:, :, 4:5, :].reshape()
+            self.outputs_arr = self.outputs_arr[:, :, :4, :]/self.inputs_arr[:, :, 4:5, :] #For loss calculation
         
         self.inputs_arr, self.inputs_mean, self.inputs_std = normalize_data(
             self.inputs_arr
