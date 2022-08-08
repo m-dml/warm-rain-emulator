@@ -125,16 +125,17 @@ class LightningModel(pl.LightningModule):
         return model
 
     def forward(self):
-        if self.lo_norm:
-        #normalize wrt Lo
-            Lo = ((self.x[:,-2]* self.inputs_std[-2]) + self.inputs_mean[-2]).reshape(-1,1)
-            #un-normalize Lo
-        
-            self.x_lo = torch.clone(self.x)
-            self.x_lo[:,:4] = self.x[:,:4]/Lo
-            self.updates = self.model(self.x_lo)
-        else:
-             self.updates = self.model(self.x)
+        # if self.lo_norm:
+        # #normalize wrt Lo
+        #     Lo = ((self.x[:,-2]* self.inputs_std[-2]) + self.inputs_mean[-2]).reshape(-1,1)
+        #     #un-normalize Lo
+        #     # print("Here is Lo:")
+        #     # print(Lo)
+        #     self.x_lo = torch.clone(self.x)
+        #     self.x_lo[:,:4] = self.x[:,:4]/Lo
+        #     self.updates = self.model(self.x_lo)
+        # else:
+        self.updates = self.model(self.x)
             
         self.norm_obj = normalizer(
             self.updates,
