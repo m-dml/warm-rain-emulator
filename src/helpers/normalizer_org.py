@@ -51,7 +51,7 @@ class normalizer:
             #removing Lo norm from real_x values
             lo = (self.x[:, 4:5] * self.inputs_std[4:5]) + self.inputs_mean[4:5]
         
-            self.real_x = self.real_x[:, :4] * lo
+            self.real_x = self.real_x[:, :4] * lo.reshape(-1, 1)
             
         
             #Scaling with respect to the corresponding Lo
@@ -121,7 +121,10 @@ class normalizer:
             self.pred_moment[:, 0] = (
                 Lo - self.pred_moment[:, 2]
             )  # Lc calculated from Lr
-
+            
+        if self.lo_norm:   
+            self.pred_moment_norm =  self.pred_moment/(Lo).reshape(-1,1)
+            
         self.pred_moment_norm = (
             self.pred_moment - self.inputs_mean[: self.out_features]
         ) / self.inputs_std[
