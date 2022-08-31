@@ -14,6 +14,7 @@ class simulation_forecast:
         inputs_std,
         updates_mean,
         updates_std,
+        lo_norm=None
     ):
         self.arr = arr
         self.sim_number = sim_number
@@ -25,6 +26,7 @@ class simulation_forecast:
         self.moment_preds = []
         self.updates_prev = None
         self.real_updates = []
+        self.lo_norm = lo_norm
 
     def setup(self):
 
@@ -33,7 +35,7 @@ class simulation_forecast:
         arr_new = np.delete((arr[:, :, :]), [3, 6], 1)
 
         if len(arr_new.shape)<4:
-            print("Mask is false")
+            #print("Mask is false")
             self.test_sims = arr_new 
         else:
             k = np.ma.getmask(self.arr)
@@ -46,10 +48,14 @@ class simulation_forecast:
         self.orig = np.ma.compress_rows(self.test_sims[:, 1:5, self.sim_number])
         self.sim_data = self.test_sims[0, 1:, self.sim_number]
         self.model_params = self.sim_data[-4:-1]
+        self.lo = self.sim_data[0] + self.sim_data[2]
+        self.model_params[0] = self.lo
         self.create_input()
+        #print(self.inputs)
+        #np.save("/gpfs/home/sharmas/micro-param/initial_conditions/lo_002_rm_13_nu_1.npy",self.inputs.data)
         predictions_updates = self.model.test_step(torch.from_numpy(self.inputs))
         self.moment_calc(predictions_updates)
-        print(np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape)
+        #print(np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape)
         for i in range(
             1, np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape[0]
         ):
@@ -66,19 +72,30 @@ class simulation_forecast:
 
     # For creation of inputs
     def create_input(self):
-        tau = self.sim_data[2] / (self.sim_data[2] + self.sim_data[0])
+        tau = self.sim_data[2] / (self.lo)
 
         xc = self.sim_data[0] / (self.sim_data[1] + 1e-8)
-
-        inputs = np.concatenate(
-            (
-                self.sim_data[0:4].reshape(1, -1),
-                tau.reshape(1, -1),
-                xc.reshape(1, -1),
-                self.model_params.reshape(1, -1),
-            ),
-            axis=1,
-        )
+        if self.lo_norm:
+            inputs = np.concatenate(
+                (
+                    (self.sim_data[0:4].reshape(1, -1))/self.model_params[0],
+                    tau.reshape(1, -1),
+                    xc.reshape(1, -1),
+                    self.model_params.reshape(1, -1),
+                ),
+                axis=1,
+            )
+        else:
+            inputs = np.concatenate(
+                (
+                    self.sim_data[0:4].reshape(1, -1),
+                    tau.reshape(1, -1),
+                    xc.reshape(1, -1),
+                    self.model_params.reshape(1, -1),
+                ),
+                axis=1,
+            )
+            
         # new_input_=np.concatenate((predictions_orig_[:,0:],self.model_params.reshape(1,-1),tau.reshape(1,-1),xc.reshape(1,-1)),axis=1)
 
         self.inputs = self.calc_mean(inputs, self.inputs_mean, self.inputs_std)
@@ -95,7 +112,7 @@ class simulation_forecast:
 
         if self.updates[0, 1] > 0:
             self.updates[0, 1] = 0
-
+        self.updates[0,0] = -self.updates[0,2]
     def check_preds(self):
 
         if self.preds[0, 0] < 0:
@@ -113,16 +130,19 @@ class simulation_forecast:
         if self.preds[0, 3] < 0:
             self.preds[0, 3] = 0
 
-        self.preds[:, 0] = self.model_params[0] - self.preds[:, 2]
+        #self.preds[:, 0] = self.model_params[0] - self.preds[:, 2]
 
     def moment_calc(self, predictions_updates):
         self.updates = (
             predictions_updates.detach().numpy() * self.updates_std
         ) + self.updates_mean
         self.check_updates()
-
-        self.preds = self.sim_data[0:4] + (self.updates * 20)
+        if self.lo_norm:
+            self.preds = (self.sim_data[0:4] + (self.updates * 20))* self.model_params[1]
+        else:
+            self.preds = (self.sim_data[0:4] + (self.updates * 20))
         self.check_preds()
+        
         # print(self.updates)
         self.moment_preds.append(self.preds)
         self.sim_data = self.preds.reshape(
