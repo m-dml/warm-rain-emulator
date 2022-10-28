@@ -42,7 +42,9 @@ class LightningModel(pl.LightningModule):
         use_dropout=False,
         single_sim_num=None,
         avg_dataloader=False,
-        pretrained_path=None
+        pretrained_path=None,
+        lo_norm=None,
+        ro_norm=None
     ):
         super().__init__()
         self.moment_scheme = moment_scheme
@@ -75,7 +77,8 @@ class LightningModel(pl.LightningModule):
         self.inputs_mean = torch.from_numpy(inputs_mean).float().to("cuda")
         self.inputs_std = torch.from_numpy(inputs_std).float().to("cuda")
 
-        self.lo_norm = True
+        self.lo_norm = lo_norm
+        self.ro_norm = ro_norm
         # Some plotting stuff
         self.color = ["#26235b", "#bc473a", "#812878", "#f69824"]
         self.var = ["Lc", "Nc", "Lr", "Nr"]
@@ -145,6 +148,7 @@ class LightningModel(pl.LightningModule):
             self.updates_std,
             self.inputs_mean,
             self.inputs_std,
+            # self.lo_norm,
             self.device,
             self.hard_constraints_updates,
             self.hard_constraints_moments,
@@ -154,8 +158,10 @@ class LightningModel(pl.LightningModule):
             self.real_y,
             self.pred_moment,
             self.pred_moment_norm,
+            self.lo,
+            self.ro
         ) = self.norm_obj.calc_preds()
-        self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
+        # self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
 
     def loss_function(self, updates, y, k=None):
 
@@ -168,8 +174,14 @@ class LightningModel(pl.LightningModule):
 
         # For moments
         if self.loss_absolute:
-
-            pred_loss = self.criterion(self.pred_moment_norm, y)
+            if self.lo_norm:
+                pred_loss = self.criterion(self.pred_moment_norm/self.lo.reshape(-1,1), y/self.lo.reshape(-1,1))
+                if self.ro_norm:
+                    pred_loss = self.criterion(self.pred_moment_norm/(self.lo.reshape(-1,1)*self.ro.reshape(-1,1)), 
+                                               y/(self.lo.reshape(-1,1)*self.ro.reshape(-1,1)))
+                    
+            else:
+                pred_loss = self.criterion(self.pred_moment_norm, y)
             if (self.training is True) and self.plot_all_moments is True:
                 self._plot_all_moments(y, k)
 
@@ -197,7 +209,8 @@ class LightningModel(pl.LightningModule):
 
         self.x, updates, y = batch
         self.x = self.x.squeeze()
-
+        # print("Shape of x:", self.x.shape)
+        # print("Shape of y:", y.shape)
         self.loss_each_step = self.cumulative_loss = torch.tensor(
             (0.0), dtype=torch.float32, device=self.device
         )
