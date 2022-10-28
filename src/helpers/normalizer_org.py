@@ -15,11 +15,13 @@ class normalizer:
         inputs_mean,
         inputs_std,
         device,
+        lo_norm=False,
+        
         hard_constraints_updates=True,
         hard_constraints_moments=True,
         mass_cons_moments=True,
         out_features=4,
-        lo_norm=True
+        
     ):
 
         self.updates = updates
@@ -47,22 +49,32 @@ class normalizer:
             self.x[:, : self.out_features] * self.inputs_std[: self.out_features]
             + self.inputs_mean[: self.out_features]
         )
+        lo = (self.x[:, -3] * self.inputs_std[-3]) + self.inputs_mean[-3]
+        ro = (self.x[:, -2] * self.inputs_std[-2]) + self.inputs_mean[-2]
         if self.lo_norm:
             #removing Lo norm from real_x values
-            lo = (self.x[:, 4:5] * self.inputs_std[4:5]) + self.inputs_mean[4:5]
-        
+          
             self.real_x = self.real_x[:, :4] * lo.reshape(-1, 1)
             
         
             #Scaling with respect to the corresponding Lo
         self.pred_moment = (self.real_x + self.real_updates * 20)
-           
-        if self.lo_norm:   
-            self.pred_moment =  self.pred_moment/(lo).reshape(-1,1)
+        # if self.mass_cons_moments:
+        #     print(lo.shape)
+        #     print(self.pred_moment.shape)
+        #     """Best not to use if hard constraints are not used in moments"""
+        #     self.pred_moment[:, 0] = (
+        #         lo - self.pred_moment[:, 2]
+        #     )  # Lc calculated from Lr
             
-        
-        self.pred_moment_norm = ((
-        self.pred_moment - self.inputs_mean[: self.out_features]) / self.inputs_std[: self.out_features])
+        if self.lo_norm:   
+            self.pred_moment_norm =  self.pred_moment/(lo).reshape(-1,1)
+            self.pred_moment_norm = ((
+        self.pred_moment_norm - self.inputs_mean[: self.out_features]) / self.inputs_std[: self.out_features])
+            
+        else:
+            self.pred_moment_norm = ((
+            self.pred_moment - self.inputs_mean[: self.out_features]) / self.inputs_std[: self.out_features])
             
         self.real_y = (
             self.y[:, : self.out_features] * self.inputs_std[: self.out_features]
@@ -70,8 +82,8 @@ class normalizer:
         )
         if self.lo_norm:
             self.real_y[:, : self.out_features] =  self.real_y[:, : self.out_features] * lo.reshape(-1,1)
-            
-        return self.real_x, self.real_y, self.pred_moment, self.pred_moment_norm
+       
+        return self.real_x, self.real_y, self.pred_moment, self.pred_moment_norm, lo, ro
 
     def set_constraints(self):
         assert self.updates is not None
@@ -92,11 +104,12 @@ class normalizer:
             self.updates = (
                 self.real_updates - self.updates_mean
             ) / self.updates_std  # normalized and stored as updates, to be used for direct comaprison
-        self.real_x = (
-            self.x[:, : self.out_features] * self.inputs_std[: self.out_features]
-            + self.inputs_mean[: self.out_features]
-        )  # un-normalize
-        self.pred_moment = self.real_x + self.real_updates * 20
+        # self.real_x = (
+        #     self.x[:, : self.out_features] * self.inputs_std[: self.out_features]
+        #     + self.inputs_mean[: self.out_features]
+        # )  # un-normalize
+        # self.pred_moment = self.real_x + self.real_updates * 20
+        
         Lo = (
             self.x[:, -3] * self.inputs_std[-3] + self.inputs_mean[-3]
         )  # For total water content
@@ -123,12 +136,15 @@ class normalizer:
             )  # Lc calculated from Lr
             
         if self.lo_norm:   
-            self.pred_moment_norm =  self.pred_moment/(Lo).reshape(-1,1)
-            
-        self.pred_moment_norm = (
-            self.pred_moment - self.inputs_mean[: self.out_features]
-        ) / self.inputs_std[
-            : self.out_features
-        ]  # Normalized value of predicted moments (not updates)
+            self.pred_moment_norm[:, 0] = self.pred_moment/Lo.reshape(-1,1)
+            self.pred_moment_norm[:, 0] =  (self.pred_moment_norm[:, 0] - self.inputs_mean[2: 3].reshape(-1,1)) / self.inputs_std[2: 3].reshape(-1,1)
+            #self.pred_moment_norm = (self.pred_moment_norm - self.inputs_mean[: self.out_features]) / self.inputs_std[: self.out_features]
+           
+        else:
+            self.pred_moment_norm = (
+                self.pred_moment - self.inputs_mean[: self.out_features]
+            ) / self.inputs_std[
+                : self.out_features
+            ]  # Normalized value of predicted moments (not updates)
 
         return self.pred_moment, self.pred_moment_norm
