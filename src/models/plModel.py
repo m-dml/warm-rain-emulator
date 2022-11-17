@@ -71,7 +71,8 @@ class LightningModel(pl.LightningModule):
         self.single_sim_num = single_sim_num
         self.avg_dataloader = avg_dataloader
         self.save_hyperparameters()
-
+        # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # print(device)
         self.updates_std = torch.from_numpy(updates_std).float().to("cuda")
         self.updates_mean = torch.from_numpy(updates_mean).float().to("cuda")
         self.inputs_mean = torch.from_numpy(inputs_mean).float().to("cuda")
@@ -93,7 +94,8 @@ class LightningModel(pl.LightningModule):
             use_batch_norm,
             use_dropout,
             save_dir,
-            pretrained_path,
+            pretrained_path
+           
         )
 
     @staticmethod
@@ -107,7 +109,8 @@ class LightningModel(pl.LightningModule):
         use_batch_norm,
         use_dropout,
         save_dir,
-        pretrained_path,
+        pretrained_path
+       
     ):
         os.chdir(save_dir)
         model = plNetwork(
@@ -161,7 +164,7 @@ class LightningModel(pl.LightningModule):
             self.lo,
             self.ro
         ) = self.norm_obj.calc_preds()
-        # self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
+        self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
 
     def loss_function(self, updates, y, k=None):
 
@@ -174,14 +177,15 @@ class LightningModel(pl.LightningModule):
 
         # For moments
         if self.loss_absolute:
-            if self.lo_norm:
-                pred_loss = self.criterion(self.pred_moment_norm/self.lo.reshape(-1,1), y/self.lo.reshape(-1,1))
-                if self.ro_norm:
-                    pred_loss = self.criterion(self.pred_moment_norm/(self.lo.reshape(-1,1)*self.ro.reshape(-1,1)), 
-                                               y/(self.lo.reshape(-1,1)*self.ro.reshape(-1,1)))
+            pred_loss = self.criterion(self.pred_moment_norm, y)
+            # if self.lo_norm:
+            #     pred_loss = self.criterion(self.pred_moment_norm/self.lo.reshape(-1,1), y/self.lo.reshape(-1,1))
+            #     if self.ro_norm:
+            #         pred_loss = self.criterion(self.pred_moment_norm/(self.lo.reshape(-1,1)*self.ro.reshape(-1,1)), 
+            #                                    y/(self.lo.reshape(-1,1)*self.ro.reshape(-1,1)))
                     
-            else:
-                pred_loss = self.criterion(self.pred_moment_norm, y)
+            
+                
             if (self.training is True) and self.plot_all_moments is True:
                 self._plot_all_moments(y, k)
 
