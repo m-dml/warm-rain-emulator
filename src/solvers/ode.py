@@ -53,6 +53,7 @@ class simulation_forecast:
         self.create_input()
         #print(self.inputs)
         #np.save("/gpfs/home/sharmas/micro-param/initial_conditions/lo_002_rm_13_nu_1.npy",self.inputs.data)
+        self.model.eval()
         predictions_updates = self.model.test_step(torch.from_numpy(self.inputs))
         self.moment_calc(predictions_updates)
         #print(np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape)
@@ -61,6 +62,7 @@ class simulation_forecast:
         ):
 
             self.create_input()
+            self.model.eval()
             predictions_updates = self.model.test_step(torch.from_numpy(self.inputs))
             self.moment_calc(predictions_updates)
 
