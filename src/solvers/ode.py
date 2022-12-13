@@ -24,6 +24,7 @@ class simulation_forecast:
         self.updates_std = updates_std
         self.model = new_model
         self.moment_preds = []
+        self.all_updates = []
         self.updates_prev = None
         self.real_updates = []
         self.lo_norm = lo_norm
@@ -78,7 +79,7 @@ class simulation_forecast:
 
         xc = self.sim_data[0] / (self.sim_data[1] + 1e-8)
         if self.lo_norm:
-            inputs = np.concatenate(
+            self.real_inputs = np.concatenate(
                 (
                     (self.sim_data[0:4].reshape(1, -1))/self.model_params[0],
                     tau.reshape(1, -1),
@@ -88,7 +89,7 @@ class simulation_forecast:
                 axis=1,
             )
         else:
-            inputs = np.concatenate(
+            self.real_inputs = np.concatenate(
                 (
                     self.sim_data[0:4].reshape(1, -1),
                     tau.reshape(1, -1),
@@ -100,39 +101,47 @@ class simulation_forecast:
             
         # new_input_=np.concatenate((predictions_orig_[:,0:],self.model_params.reshape(1,-1),tau.reshape(1,-1),xc.reshape(1,-1)),axis=1)
 
-        self.inputs = self.calc_mean(inputs, self.inputs_mean, self.inputs_std)
+        self.inputs = self.calc_mean(self.real_inputs, self.inputs_mean, self.inputs_std)
         self.inputs = np.float32(self.inputs)
 
     # For checking updates
     def check_updates(self):
         
-        if self.updates[0, 0] > 0:
-            self.updates[0, 0] = 0
 
-        if self.updates[0, 2] < 0:
-            self.updates[0, 2] = 0
-
+#         if self.updates[0, 2] < 0:
+#             self.updates[0, 2] = 0
+            
         if self.updates[0, 1] > 0:
             self.updates[0, 1] = 0
+            
+        
         self.updates[0,0] = -self.updates[0,2]
     def check_preds(self):
 
         if self.preds[0, 0] < 0:
             self.preds[0, 0] = 0
+                    
+        if self.preds[0, 1] < 0:
+            self.preds[0, 1] = 0
 
         if self.preds[0, 2] < 0:
             self.preds[0, 2] = 0
 
         if self.preds[0, 2] > self.model_params[0]:
             self.preds[0, 2] = self.model_params[0]
+            
+#         if self.preds[0, 0] > self.model_params[0]:
+#             self.preds[0, 0] = self.model_params[0]
 
-        if self.preds[0, 1] < 0:
-            self.preds[0, 1] = 0
+            
+        if self.preds[0, 1] > self.real_inputs[:,1]:
+            self.preds[0, 1] = self.real_inputs[:,1]
 
         if self.preds[0, 3] < 0:
             self.preds[0, 3] = 0
-
-        #self.preds[:, 0] = self.model_params[0] - self.preds[:, 2]
+            
+        self.preds_disp = np.copy(self.preds)
+        self.preds_disp[:, 0] = self.model_params[0] - self.preds_disp[:, 2]
 
     def moment_calc(self, predictions_updates):
         self.updates = (
@@ -143,14 +152,16 @@ class simulation_forecast:
             self.preds = (self.sim_data[0:4] + (self.updates * 20))* self.model_params[1]
         else:
             self.preds = (self.sim_data[0:4] + (self.updates * 20))
+            #self.preds_disp = np.copy(self.preds)
         self.check_preds()
         
         # print(self.updates)
-        self.moment_preds.append(self.preds)
+        self.moment_preds.append(self.preds_disp)
         self.sim_data = self.preds.reshape(
             -1,
         )
         self.updates_prev = self.updates
+        self.all_updates.append(self.updates_prev)
 
 
 class SB_forecast:
