@@ -3,7 +3,6 @@ import torch
 from torch import nn
 
 
-#test
 class simulation_forecast:
     def __init__(
         self,
@@ -107,17 +106,18 @@ class simulation_forecast:
     # For checking updates
     def check_updates(self):
         
-
-#         if self.updates[0, 2] < 0:
-#             self.updates[0, 2] = 0
-            
         if self.updates[0, 1] > 0:
             self.updates[0, 1] = 0
             
         
         self.updates[0,0] = -self.updates[0,2]
+        
+        # if self.updates[0, 2] < 0:
+        #     self.updates[0, 2] = 0
+            
     def check_preds(self):
-
+        
+        #Negativity constraints
         if self.preds[0, 0] < 0:
             self.preds[0, 0] = 0
                     
@@ -126,23 +126,24 @@ class simulation_forecast:
 
         if self.preds[0, 2] < 0:
             self.preds[0, 2] = 0
-
+            
+        if self.preds[0, 3] < 0:
+            self.preds[0, 3] = 0
+            
+        #Maxima contraints
         if self.preds[0, 2] > self.model_params[0]:
             self.preds[0, 2] = self.model_params[0]
-            
-#         if self.preds[0, 0] > self.model_params[0]:
-#             self.preds[0, 0] = self.model_params[0]
-
+           
+        # if self.preds[0, 0] > self.model_params[0]:
+        #     self.preds[0, 0] = self.model_params[0]
+ 
             
         if self.preds[0, 1] > self.real_inputs[:,1]:
             self.preds[0, 1] = self.real_inputs[:,1]
 
-        if self.preds[0, 3] < 0:
-            self.preds[0, 3] = 0
-            
         self.preds_disp = np.copy(self.preds)
         self.preds_disp[:, 0] = self.model_params[0] - self.preds_disp[:, 2]
-
+        
     def moment_calc(self, predictions_updates):
         self.updates = (
             predictions_updates.detach().numpy() * self.updates_std
@@ -181,7 +182,7 @@ class SB_forecast:
 
         self.lo = arr[0, -4, sim_num]
         self.rm = arr[0, -3, sim_num]
-        self.nu = arr[0, -1, sim_num]
+        self.nu = arr[0, -2, sim_num]
 
         self.lc = arr[0, 1, sim_num]
         self.nc = arr[0, 2, sim_num]
