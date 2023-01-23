@@ -186,8 +186,8 @@ class LightningModel(pl.LightningModule):
                     
             
                 
-            if (self.training is True) and self.plot_all_moments is True:
-                self._plot_all_moments(y, k)
+            # if (self.training is True) and self.plot_all_moments is True:
+            #     self._plot_all_moments(y, k)
 
         else:
             pred_loss = self.criterion(updates, self.updates)
@@ -229,11 +229,17 @@ class LightningModel(pl.LightningModule):
 
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k], k)
-            new_str = "Train_loss_" + str(k)
+            new_str = "Train_loss_" + str(k+1)
             self.log(new_str, self.loss_each_step)
             self.log("train_loss", self.cumulative_loss.reshape(1, 1))
-
-        return self.cumulative_loss
+            
+        if self.pretrained_path is not None:
+             #Called for multi-step to ignore all the steps apart from the last
+            return self.loss_each_step
+        else:
+            
+                #Only called during one step training
+            return self.cumulative_loss
 
     def validation_step(self, batch, batch_idx):
         self.x, updates, y = batch
@@ -243,49 +249,51 @@ class LightningModel(pl.LightningModule):
         self.loss_each_step = self.cumulative_loss = torch.tensor(
             (0.0), dtype=torch.float32, device=self.device
         )
-        val_preds_step = []
+        #val_preds_step = []
         for k in range(self.step_size):
             self.y = y[:, :, k].squeeze()
             self.forward()
             assert self.updates is not None
             self.loss_each_step = self.loss_function(updates[:, :, k], y[:, :, k], k)
-            val_preds_step.append(self.pred_moment.cpu().numpy())
+            #val_preds_step.append(self.pred_moment.cpu().numpy())
             self.cumulative_loss = self.cumulative_loss + self.loss_each_step
             if self.step_size > 1:
                 self.calc_new_x(y[:, :, k], k)
+            
 
-        self.log("val_loss", self.cumulative_loss.reshape(1, 1))
+        self.log("tot_val_loss", self.cumulative_loss.reshape(1, 1))
+        self.log("last_val_loss", self.loss_each_step.reshape(1, 1))
 
-        val_preds_step = np.asarray(val_preds_step)
-        val_preds_step = np.moveaxis(val_preds_step, 0, -1)
+        # val_preds_step = np.asarray(val_preds_step)
+        # val_preds_step = np.moveaxis(val_preds_step, 0, -1)
 
-        return {"preds": val_preds_step, "y": y.cpu().numpy()}
+        # return {"preds": val_preds_step, "y": y.cpu().numpy()}
 
-    def validation_epoch_end(self, validation_step_outputs):
-        # validation_step_outputs is a list of dictionaries
+    # def validation_epoch_end(self, validation_step_outputs):
+    #     # validation_step_outputs is a list of dictionaries
 
-        if self.single_sim_num is not None:
-            outs_list = []
-            preds_list = []
-            for k, v in [
-                (k, v) for x in validation_step_outputs for (k, v) in x.items()
-            ]:
-                if k == "preds":
-                    preds_list.append(v)
-                else:
-                    outs_list.append(v)
+    #     if self.single_sim_num is not None:
+    #         outs_list = []
+    #         preds_list = []
+    #         for k, v in [
+    #             (k, v) for x in validation_step_outputs for (k, v) in x.items()
+    #         ]:
+    #             if k == "preds":
+    #                 preds_list.append(v)
+    #             else:
+    #                 outs_list.append(v)
 
-            self.val_preds = np.vstack(preds_list)
-            self.val_y = np.vstack(outs_list)
-            """Now we have stacked outputs and predictions, no shuffle hence no rearrangement needed """
-            for k in range(self.step_size):
-                fig, figname = self._plot_val_outputs(
-                    self.val_y[:, :, k], self.val_preds[:, :, k], k
-                )
+    #         self.val_preds = np.vstack(preds_list)
+    #         self.val_y = np.vstack(outs_list)
+    #         """Now we have stacked outputs and predictions, no shuffle hence no rearrangement needed """
+    #         for k in range(self.step_size):
+    #             fig, figname = self._plot_val_outputs(
+    #                 self.val_y[:, :, k], self.val_preds[:, :, k], k
+    #             )
 
-                self.logger.experiment.add_figure(
-                    figname + ": Step  " + str(k + 1), fig, self.global_step
-                )
+    #             self.logger.experiment.add_figure(
+    #                 figname + ": Step  " + str(k + 1), fig, self.global_step
+    #             )
 
     def test_step(self, initial_moments):
 
@@ -321,23 +329,23 @@ class LightningModel(pl.LightningModule):
             new_x[:, 6:] = self.x[:, 6:]
             self.x = new_x
 
-    def plot_preds(self, k=None):
-        x = self.real_y[:, : self.out_features].cpu().detach().numpy()
-        y = self.pred_moment.cpu().detach().numpy()
+    # def plot_preds(self, k=None):
+    #     x = self.real_y[:, : self.out_features].cpu().detach().numpy()
+    #     y = self.pred_moment.cpu().detach().numpy()
 
-        sns.set_theme(style="darkgrid")
-        fig = plt.figure(figsize=(15, 12))
-        for i in range(4):
-            ax = fig.add_subplot(2, 2, i + 1)
-            sns.regplot(x[:, i], y[:, i], color=self.color[i])
-            plt.title(self.var[i])
-            plt.ylabel("Neural Network Predictions")
-            plt.xlabel("Real Value")
-            plt.tight_layout()
+    #     sns.set_theme(style="darkgrid")
+    #     fig = plt.figure(figsize=(15, 12))
+    #     for i in range(4):
+    #         ax = fig.add_subplot(2, 2, i + 1)
+    #         sns.regplot(x[:, i], y[:, i], color=self.color[i])
+    #         plt.title(self.var[i])
+    #         plt.ylabel("Neural Network Predictions")
+    #         plt.xlabel("Real Value")
+    #         plt.tight_layout()
 
-        figname = "Mc-Snow vs ML at NaN"
+    #     figname = "Mc-Snow vs ML at NaN"
 
-        return fig, figname
+    #     return fig, figname
 
     def _plot_all_moments(self, y, k):
 
@@ -353,23 +361,23 @@ class LightningModel(pl.LightningModule):
             global_step=self.global_step,
         )
 
-    def _plot_val_outputs(self, stacked_y, all_preds, k):
-        stacked_y = (
-            stacked_y * self.inputs_std[: self.out_features].cpu().detach().numpy()
-        ) + self.inputs_mean[: self.out_features].cpu().detach().numpy()
-        delta = stacked_y - all_preds
-        time = np.arange(delta.shape[0])
-        sns.set_theme(style="darkgrid")
-        fig = plt.figure(figsize=(15, 12))
-        for i in range(4):
-            ax = fig.add_subplot(2, 2, i + 1)
-            plt.plot(time, delta[:, i], color=self.color[i])
-            plt.title(self.var[i])
-            plt.ylabel("Real Moments - Predicted Moments (Norm)")
-            plt.xlabel("Time")
-            plt.tight_layout()
-            plt.suptitle("Residuals at step " + str(k + 1))
+    # def _plot_val_outputs(self, stacked_y, all_preds, k):
+    #     stacked_y = (
+    #         stacked_y * self.inputs_std[: self.out_features].cpu().detach().numpy()
+    #     ) + self.inputs_mean[: self.out_features].cpu().detach().numpy()
+    #     delta = stacked_y - all_preds
+    #     time = np.arange(delta.shape[0])
+    #     sns.set_theme(style="darkgrid")
+    #     fig = plt.figure(figsize=(15, 12))
+    #     for i in range(4):
+    #         ax = fig.add_subplot(2, 2, i + 1)
+    #         plt.plot(time, delta[:, i], color=self.color[i])
+    #         plt.title(self.var[i])
+    #         plt.ylabel("Real Moments - Predicted Moments (Norm)")
+    #         plt.xlabel("Time")
+    #         plt.tight_layout()
+    #         plt.suptitle("Residuals at step " + str(k + 1))
 
-        figname = "Residuals"
+    #     figname = "Residuals"
 
-        return fig, figname
+    #     return fig, figname
