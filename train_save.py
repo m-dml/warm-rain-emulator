@@ -1,31 +1,29 @@
 import os
 import sys
-import numpy as np
+import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 from src.models.plModel import LightningModel
 from src.utils.IndexDataloader import DataModule
-from src.helpers.plotting import plot_simulation, calc_errors
-from src.solvers.ode import simulation_forecast, SB_forecast
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-import torch
+#from pytorch_lightning.profilers import AdvancedProfiler
 from omegaconf import OmegaConf
 
-from torch.utils.tensorboard import SummaryWriter
 
 
 if len(sys.argv) > 1:
     file_name = sys.argv[1]
 
 else:
-    file_name = "config"
+    file_name = "avg_ic.yaml"
 
-CONFIG_PATH = "conf/"
+CONFIG_PATH = "conf/all_sims/averaged_sims/"
 
 
 def load_config(config_name):
     with open(os.path.join(CONFIG_PATH, config_name)) as file:
         config = OmegaConf.load(file)
+
 
     return config
 
@@ -45,6 +43,7 @@ def cli_main():
         moment_scheme=config.moment_scheme,
         single_sim_num=config.single_sim_num,
         avg_dataloader=config.avg_dataloader,
+        lo_norm=False
         
     )
     data_module.setup()
@@ -77,78 +76,32 @@ def cli_main():
         use_dropout=config.use_dropout,
         single_sim_num=config.single_sim_num,
         avg_dataloader=config.avg_dataloader,
+        pretrained_path=config.pretrained_dir,
+        lo_norm=config.lo_norm,
+        ro_norm=config.ro_norm
     )
 
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss", save_top_k=1, mode="min", save_last=True
+        monitor="last_val_loss", save_top_k=1, mode="min", save_last=True
     )
 
-    #early_stop = EarlyStopping(monitor="val_loss", patience=20, verbose=True)
-
+    early_stop = EarlyStopping(monitor="last_val_loss", patience=50, verbose=True)
+    #profiler = AdvancedProfiler(dirpath = config.save_dir+ "/lightning_logs/version_" + os.environ["SLURM_JOB_ID"],filename="profiling_info")
     trainer = pl.Trainer(
-        callbacks=[checkpoint_callback],
-        gpus=GPUS,
+        callbacks=[checkpoint_callback, early_stop],
+        devices=GPUS,
+        accelerator='gpu',
+        #strategy='ddp',
         max_epochs=N_EPOCHS,
-        num_sanity_val_steps=0,
-        gradient_clip_val=0.5)
+        num_sanity_val_steps=0
+        )
 
     trainer.fit(pl_model, data_module)
 
     return data_module, pl_model, trainer
-
-def load_array():
-    
-    all_arr = np.load("/gpfs/work/sharmas/mc-snow-data/sim_100_data.npy")
-    arr = np.mean(all_arr[:, :, :], axis=-1)
-    arr = np.expand_dims(arr, axis=-1)
-    all_arr = np.expand_dims(all_arr, axis=2)
-    return all_arr, arr
     
 
 if __name__ == "__main__":
     config = load_config(file_name + ".yaml")
 
     _dm, _model, _trainer = cli_main()
-
-    #The code below plots ODE solutions for the trained model
-    try:
-        assert config.single_sim_num is not None
-        all_arr, arr = load_array()
-
-        print("Loaded Data")
-        #Plotting done here
-        trained_model = _model.load_from_checkpoint (config.save_dir + "/lightning_logs/version_" + os.environ["SLURM_JOB_ID"]+
-                                                  "/checkpoints/last.ckpt")
-        sim_num = 0
-        new_forecast = simulation_forecast(
-            arr,
-            trained_model,
-            sim_num,
-            _dm.inputs_mean,
-            _dm.inputs_std,
-            _dm.updates_mean,
-            _dm.updates_std,
-        )
-
-        new_forecast.test()
-
-        sb_forecast = SB_forecast(arr, sim_num)
-        sb_forecast.SB_calc()
-        predictions_sb = np.asarray(sb_forecast.predictions).reshape(-1, 4)
-        var_all = np.transpose(calc_errors(all_arr, sim_num))
-        fig= plot_simulation(
-            np.asarray(new_forecast.moment_preds).reshape(-1, 4),
-            new_forecast.orig,
-            predictions_sb,
-            var_all,
-            new_forecast.model_params,
-            num=100,
-        )
-        figname = "ODE Solutions"
-        dir_name = "/lightning_logs/version_"+ os.environ["SLURM_JOB_ID"]
-        writer = SummaryWriter(log_dir=config.save_dir + dir_name)
-        writer.add_figure(figname, fig)
-        writer.close()
-
-    except:
-        pass
