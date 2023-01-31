@@ -1,6 +1,4 @@
 import os
-import sys
-import copy
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -131,16 +129,7 @@ class LightningModel(pl.LightningModule):
         return model
 
     def forward(self):
-        # if self.lo_norm:
-        # #normalize wrt Lo
-        #     Lo = ((self.x[:,-2]* self.inputs_std[-2]) + self.inputs_mean[-2]).reshape(-1,1)
-        #     #un-normalize Lo
-        #     # print("Here is Lo:")
-        #     # print(Lo)
-        #     self.x_lo = torch.clone(self.x)
-        #     self.x_lo[:,:4] = self.x[:,:4]/Lo
-        #     self.updates = self.model(self.x_lo)
-        # else:
+   
         self.updates = self.model(self.x)
             
         self.norm_obj = normalizer(
@@ -233,13 +222,12 @@ class LightningModel(pl.LightningModule):
             self.log(new_str, self.loss_each_step)
             self.log("train_loss", self.cumulative_loss.reshape(1, 1))
             
-        if self.pretrained_path is not None:
-             #Called for multi-step to ignore all the steps apart from the last
-            return self.loss_each_step
-        else:
-            
-                #Only called during one step training
-            return self.cumulative_loss
+        # if self.pretrained_path is not None:
+        #      #Called for multi-step to ignore all the steps apart from the last
+        #     return self.loss_each_step
+        # else:
+        #     #Only called during one step training
+        return self.loss_each_step
 
     def validation_step(self, batch, batch_idx):
         self.x, updates, y = batch
