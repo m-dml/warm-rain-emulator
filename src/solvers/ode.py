@@ -45,9 +45,11 @@ class simulation_forecast:
     # For testing
     def test(self):
         self.setup()
-        self.orig = np.ma.compress_rows(self.test_sims[:, 1:5, self.sim_number])
+        print(self.test_sims[:, 1:5, self.sim_number].shape)
+        self.orig = np.ma.compress_rows(self.test_sims[:, 1:5, self.sim_number].squeeze())
         self.sim_data = self.test_sims[0, 1:, self.sim_number]
         self.model_params = self.sim_data[-4:-1]
+        print(self.sim_data)
         self.lo = self.sim_data[0] + self.sim_data[2]
         self.model_params[0] = self.lo
         self.create_input()
@@ -109,11 +111,11 @@ class simulation_forecast:
         if self.updates[0, 1] > 0:
             self.updates[0, 1] = 0
             
-        
+       
         self.updates[0,0] = -self.updates[0,2]
         
-        # if self.updates[0, 2] < 0:
-        #     self.updates[0, 2] = 0
+        if self.updates[0, 2] < 0:
+            self.updates[0, 2] = 0
             
     def check_preds(self):
         
