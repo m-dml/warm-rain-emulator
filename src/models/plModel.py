@@ -4,8 +4,6 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from src.models.nnmodel import plNetwork
-from matplotlib import pyplot as plt
-import seaborn as sns
 from src.helpers.normalizer_org import normalizer
 
 
@@ -167,16 +165,6 @@ class LightningModel(pl.LightningModule):
         # For moments
         if self.loss_absolute:
             pred_loss = self.criterion(self.pred_moment_norm, y)
-            # if self.lo_norm:
-            #     pred_loss = self.criterion(self.pred_moment_norm/self.lo.reshape(-1,1), y/self.lo.reshape(-1,1))
-            #     if self.ro_norm:
-            #         pred_loss = self.criterion(self.pred_moment_norm/(self.lo.reshape(-1,1)*self.ro.reshape(-1,1)), 
-            #                                    y/(self.lo.reshape(-1,1)*self.ro.reshape(-1,1)))
-                    
-            
-                
-            # if (self.training is True) and self.plot_all_moments is True:
-            #     self._plot_all_moments(y, k)
 
         else:
             pred_loss = self.criterion(updates, self.updates)
@@ -192,8 +180,17 @@ class LightningModel(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,mode='min')
 
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "metric_to_track"}
+    
+    # def optimizer_step(self, epoch_nb, batch_nb, optimizer, optimizer_i, second_order_closure=None):              
+    #     if batch_nb == 0: # to call the scheduler after each validation
+    #         self.scheduler.step(self.total_val_loss)
+    #         print(f'metric: {self.total_val_loss}, best: {self.scheduler.best}, num_bad_epochs: {self.scheduler.num_bad_epochs}') # for debugging
+    #     optimizer.step()
+    #     optimizer.zero_grad()
+        
     def training_step(self, batch, batch_idx):
 
         """Dim self.x: batch, inputs (4 moments,self.xc,tau,3 initial conditions)
@@ -227,7 +224,8 @@ class LightningModel(pl.LightningModule):
         #     return self.loss_each_step
         # else:
         #     #Only called during one step training
-        return self.loss_each_step
+        self.log('metric_to_track', self.loss_each_step)
+        return {"loss":self.loss_each_step}
 
     def validation_step(self, batch, batch_idx):
         self.x, updates, y = batch
