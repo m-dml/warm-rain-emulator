@@ -33,9 +33,10 @@ class simulation_forecast:
         arr = self.arr.astype(np.float32)
         # self.arr=np.mean(arr[:,:,719:-1,:],axis=-1)
         arr_new = np.delete((arr[:, :, :]), [3, 6], 1)
-
+        print("Shape during setup:")
+        print(arr_new.shape)
         if len(arr_new.shape)<4:
-            #print("Mask is false")
+            print("Mask is false")
             self.test_sims = arr_new 
         else:
             k = np.ma.getmask(self.arr)
@@ -45,11 +46,12 @@ class simulation_forecast:
     # For testing
     def test(self):
         self.setup()
-        print(self.test_sims[:, 1:5, self.sim_number].shape)
+      
         self.orig = np.ma.compress_rows(self.test_sims[:, 1:5, self.sim_number].squeeze())
-        self.sim_data = self.test_sims[0, 1:, self.sim_number]
+        self.sim_data = self.test_sims[0, 1:, self.sim_number].squeeze()
+       
         self.model_params = self.sim_data[-4:-1]
-        print(self.sim_data)
+        
         self.lo = self.sim_data[0] + self.sim_data[2]
         self.model_params[0] = self.lo
         self.create_input()
@@ -60,7 +62,7 @@ class simulation_forecast:
         self.moment_calc(predictions_updates)
         #print(np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape)
         for i in range(
-            1, np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape[0]
+            1, np.ma.compress_rows(self.test_sims[:, :, self.sim_number].squeeze()).shape[0]
         ):
 
             self.create_input()
@@ -202,9 +204,9 @@ class SB_forecast:
         self.sim_num = sim_num
 
     def SB_calc(self):
-        print(np.ma.compress_rows(self.test_sims[:, :, self.sim_num]).shape)
+        print(np.ma.compress_rows(self.test_sims[:, :, self.sim_num].squeeze()).shape)
         for i in range(
-            1, np.ma.compress_rows(self.test_sims[:, :, self.sim_num]).shape[0]
+            1, np.ma.compress_rows(self.test_sims[:, :, self.sim_num].squeeze()).shape[0]
         ):
             self.autoconSB()
             self.accretionSB()
