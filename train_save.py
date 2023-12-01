@@ -1,15 +1,11 @@
 import os
 import sys
-import torch
-from pytorch_lightning.callbacks import ModelCheckpoint
+import pytorch_lightning as pl
+from omegaconf import OmegaConf
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from src.models.plModel import LightningModel
 from src.utils.IndexDataloader import DataModule
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-#from pytorch_lightning.profilers import AdvancedProfiler
-from omegaconf import OmegaConf
-
-
 
 if len(sys.argv) > 1:
     file_name = sys.argv[1]
@@ -23,7 +19,6 @@ CONFIG_PATH = "conf/all_sims/averaged_sims/"
 def load_config(config_name):
     with open(os.path.join(CONFIG_PATH, config_name)) as file:
         config = OmegaConf.load(file)
-
 
     return config
 
@@ -43,8 +38,7 @@ def cli_main():
         moment_scheme=config.moment_scheme,
         single_sim_num=config.single_sim_num,
         avg_dataloader=config.avg_dataloader,
-        lo_norm=False
-        
+        lo_norm=False,
     )
     data_module.setup()
     # setting up the model:
@@ -78,7 +72,7 @@ def cli_main():
         avg_dataloader=config.avg_dataloader,
         pretrained_path=config.pretrained_dir,
         lo_norm=config.lo_norm,
-        ro_norm=config.ro_norm
+        ro_norm=config.ro_norm,
     )
 
     checkpoint_callback = ModelCheckpoint(
@@ -86,20 +80,19 @@ def cli_main():
     )
 
     early_stop = EarlyStopping(monitor="last_val_loss", patience=50, verbose=True)
-    #profiler = AdvancedProfiler(dirpath = config.save_dir+ "/lightning_logs/version_" + os.environ["SLURM_JOB_ID"],filename="profiling_info")
+    lr_monitor = LearningRateMonitor(logging_interval="step")
     trainer = pl.Trainer(
-        callbacks=[checkpoint_callback, early_stop],
+        callbacks=[checkpoint_callback, early_stop, lr_monitor],
         devices=GPUS,
-        accelerator='gpu',
-        #strategy='ddp',
+        accelerator="gpu",
         max_epochs=N_EPOCHS,
-        num_sanity_val_steps=0
-        )
+        num_sanity_val_steps=0,
+    )
 
     trainer.fit(pl_model, data_module)
 
     return data_module, pl_model, trainer
-    
+
 
 if __name__ == "__main__":
     config = load_config(file_name + ".yaml")

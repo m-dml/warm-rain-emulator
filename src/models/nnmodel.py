@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 
@@ -13,10 +12,6 @@ class plNetwork(nn.Module):
         p=0.25,
         use_batch_norm=False,
         use_dropout=False
-        # updates_mean=None,
-        # updates_std=None,
-        # inputs_mean=None,
-        # inputs_std=None
     ):
 
         super().__init__()
@@ -39,8 +34,7 @@ class plNetwork(nn.Module):
         self.activation = act
         self.n_layers = n_layers
         self.use_dropout = use_dropout
-        # self.register_buffer('updates_mean', updates_mean,persistent=False)
-        # self.register_buffer('up')
+      
 
     def _forward_impl(self, x):
         for i in range(self.n_layers):

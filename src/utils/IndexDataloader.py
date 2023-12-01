@@ -1,8 +1,7 @@
-from re import S
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 
 class my_dataset(Dataset):
@@ -22,13 +21,15 @@ class my_dataset(Dataset):
             self.inputdata = inputdata
             self.tend = tend
             self.outputs = outputs
-        assert isinstance(self.inputdata, np.ndarray) and isinstance(self.tend, np.ndarray) and isinstance(self.outputs, np.ndarray)
-            
-        
+        assert (
+            isinstance(self.inputdata, np.ndarray)
+            and isinstance(self.tend, np.ndarray)
+            and isinstance(self.outputs, np.ndarray)
+        )
 
     def __getitem__(self, index):
         i_time, i_ic, i_repeat = self.index_arr[index]
-        
+
         tend_multistep = np.empty(
             (self.moment_scheme * 2, self.step_size)
         )  # tendencies
@@ -36,11 +37,11 @@ class my_dataset(Dataset):
             (self.moment_scheme * 2, self.step_size)
         )  # outputs (moments)
         for i_step in range(self.step_size):
-            
+
             tend_multistep[:, i_step] = self.tend[i_time + i_step, i_ic, i_repeat]
-            
+
             outputs_multistep[:, i_step] = self.outputs[i_time + i_step, i_ic, i_repeat]
-        
+
         return (
             torch.from_numpy(self.inputdata[i_time, i_ic, i_repeat])
             .view(-1, 1)
@@ -48,16 +49,16 @@ class my_dataset(Dataset):
             torch.from_numpy(tend_multistep).view(-1, self.step_size).float(),
             torch.from_numpy(outputs_multistep).view(-1, self.step_size).float(),
         )
-       
+
     def __len__(self):
         return self.index_arr.shape[0]
 
 
-def normalize_data(x, flag = None):
+def normalize_data(x, flag=None):
     """
     normalize array by all but the last dimension, return normed vals, means, sds
     """
-   
+
     x_ = x.reshape(-1, x.shape[-1])
     m = x_.mean(axis=0)
     s = x_.std(axis=0)
@@ -70,7 +71,7 @@ class DataModule(pl.LightningDataModule):
         self,
         data_dir="/gpfs/work/sharmas/mc-snow-data/",
         batch_size: int = 256,
-        num_workers: int = 1,
+        num_workers: int = 10,
         tot_len=719,
         sim_num=98,
         load_from_memory=True,
@@ -79,6 +80,7 @@ class DataModule(pl.LightningDataModule):
         train_size=0.9,
         single_sim_num=None,
         avg_dataloader=False,
+        lo_norm=None,
     ):
         """
 
@@ -105,7 +107,7 @@ class DataModule(pl.LightningDataModule):
         self.train_size = train_size
         self.single_sim_num = single_sim_num
         self.avg_dataloader = avg_dataloader
-        self.lo_norm = True
+        self.lo_norm = lo_norm
         if self.load_simulations:
             """
             All the array are of the shape:
@@ -123,28 +125,25 @@ class DataModule(pl.LightningDataModule):
                 with np.load(self.data_dir + "/tendencies.npz") as npz:
                     self.tend_arr = np.ma.MaskedArray(**npz)
 
-                
-                sim_lo = self.inputs_arr[:,:,:,0] + self.inputs_arr[:,:,:,2]
-                self.inputs_arr[:,:,:,-3] = sim_lo
+                sim_lo = self.inputs_arr[:, :, :, 0] + self.inputs_arr[:, :, :, 2]
+                self.inputs_arr[:, :, :, -3] = sim_lo
                 print("Modified Lo!")
-                
 
             except:
                 self.inputs_arr = np.load(data_dir + "/inputs_all.npy")
                 self.outputs_arr = np.load(data_dir + "/outputs_all.npy")
                 self.tend_arr = np.load(data_dir + "/tendencies.npy")
-                #Modify Lo
-                
-                sim_lo = self.inputs_arr[:,0,:,0] + self.inputs_arr[:,0,:,2]
-                self.inputs_arr[:,0,:,-3] = sim_lo
+                # Modify Lo
+
+                sim_lo = self.inputs_arr[:, 0, :, 0] + self.inputs_arr[:, 0, :, 2]
+                self.inputs_arr[:, 0, :, -3] = sim_lo
                 print("Modified Lo")
         else:
             raise ValueError(
                 "Function needs to be called for calculating values from raw data!"
             )
 
-            
-    def setup(self):
+    def setup(self, stage=None):
         self.calc_norm()
         self.calc_index_array()
         self.test_train()
@@ -180,7 +179,7 @@ class DataModule(pl.LightningDataModule):
             new_arr = np.concatenate(
                 (time_points.reshape(-1, 1), unique_sim_num.reshape(-1, 1)), axis=1
             )
-            new_arr = np.vstack([new_arr] * self.sim_num)
+            new_var = new_arr = np.vstack([new_arr] * self.sim_num)
 
             sim_num_axis = np.repeat(sim_nums, l, axis=0)
 
@@ -190,9 +189,17 @@ class DataModule(pl.LightningDataModule):
 
     def calc_norm(self):
         if self.lo_norm:
-            self.inputs_arr = self.inputs_arr[:, :, :4, :]/self.inputs_arr[:, :, 4:5, :].reshape()
-            self.outputs_arr = self.outputs_arr[:, :, :4, :]/self.inputs_arr[:, :, 4:5, :] #For loss calculation
-        
+            lo = self.inputs_arr[:, :, :, -3].reshape(
+                self.inputs_arr.shape[0],
+                self.inputs_arr.shape[1],
+                self.inputs_arr.shape[2],
+                1,
+            )
+            self.inputs_arr[:, :, :, :4] = self.inputs_arr[:, :, :, :4] / lo
+            self.outputs_arr[:, :, :, :4] = (
+                self.outputs_arr[:, :, :, :4] / lo
+            )  # For loss calculation
+
         self.inputs_arr, self.inputs_mean, self.inputs_std = normalize_data(
             self.inputs_arr
         )
@@ -202,11 +209,11 @@ class DataModule(pl.LightningDataModule):
         self.tend_arr, self.updates_mean, self.updates_std = normalize_data(
             self.tend_arr
         )
-       
-            #self.tend_arr = self.tend_arr[:, :, :, :]/self.inputs_arr[:, :, 4, :]
-            
+
+        # self.tend_arr = self.tend_arr[:, :, :, :]/self.inputs_arr[:, :, 4, :]
+
         if self.avg_dataloader:
-            
+
             self.inputs_arr = np.expand_dims(
                 np.mean(self.inputs_arr[:, :, :, :], axis=2), axis=2
             )
@@ -248,11 +255,17 @@ class DataModule(pl.LightningDataModule):
         #     self.train_dataset = self.val_dataset = self.dataset
 
         # else:
+
         train_size = int(self.train_size * self.dataset.__len__())
         val_size = self.dataset.__len__() - train_size
         self.train_dataset, self.val_dataset = torch.utils.data.random_split(
             self.dataset, [train_size, val_size]
         )
+
+        # self.updates_std = torch.from_numpy(self.updates_std).float()
+        # self.updates_mean = torch.from_numpy(self.updates_mean).float()
+        # self.inputs_mean = torch.from_numpy(self.inputs_mean).float()
+        # self.inputs_std = torch.from_numpy(self.inputs_std).float()
 
         print("Train Test Val Split Done")
 

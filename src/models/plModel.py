@@ -1,9 +1,11 @@
 import os
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+
+from src.helpers.normalizer import normalizer
 from src.models.nnmodel import plNetwork
-from src.helpers.normalizer_org import normalizer
 
 
 class LightningModel(pl.LightningModule):
@@ -75,9 +77,6 @@ class LightningModel(pl.LightningModule):
 
         self.lo_norm = lo_norm
         self.ro_norm = ro_norm
-        # Some plotting stuff
-        self.color = ["#26235b", "#bc473a", "#812878", "#f69824"]
-        self.var = ["Lc", "Nc", "Lr", "Nr"]
         self.pretrained_path = pretrained_path
         self.model = self.initialization_model(
             act,
@@ -225,7 +224,7 @@ class LightningModel(pl.LightningModule):
         self.loss_each_step = self.cumulative_loss = torch.tensor(
             (0.0), dtype=torch.float32, device=self.device
         )
-        # val_preds_step = []
+        
         for k in range(self.step_size):
             self.y = y[:, :, k].squeeze()
             self.forward()
@@ -259,7 +258,7 @@ class LightningModel(pl.LightningModule):
             from NN outputs (pred_moment_norm) along with other paramters
             that are fed as inputs to the network (pred_moment)"""
 
-            # self.pred_moment, self.pred_moment_norm = self.norm_obj.set_constraints()
+           
             new_x = torch.empty_like(self.x)
             tau = self.pred_moment[:, 2] / (
                 self.pred_moment[:, 2] + self.pred_moment[:, 0]

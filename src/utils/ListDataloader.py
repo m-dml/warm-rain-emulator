@@ -1,8 +1,9 @@
+import pickle
+
 import numpy as np
 import pytorch_lightning as pl
 import torch
-import pickle
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 
 class my_dataset(Dataset):
@@ -42,7 +43,7 @@ class my_dataset(Dataset):
 class DataModule(pl.LightningDataModule):
     def __init__(
         self,
-        data_dir="/gpfs/work/sharmas/mc-snow-data/",
+        data_dir="/gpfs/work/sharmas/mc-snow-data",
         batch_size: int = 256,
         num_workers: int = 1,
         tot_len=719,
@@ -50,10 +51,12 @@ class DataModule(pl.LightningDataModule):
         moment_scheme=2,
         step_size=1,
         train_size=0.9,
+        single_sim_num=None,
+        avg_dataloader=False,
     ):
         super().__init__()
 
-        self.data_dir = "/gpfs/work/sharmas/mc-snow-data/"
+        self.data_dir = "/gpfs/work/sharmas/mc-snow-data"
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.moment_scheme = moment_scheme
@@ -63,7 +66,7 @@ class DataModule(pl.LightningDataModule):
 
         self.train_size = train_size
         self.listing = {"inputs": 0, "outputs": 1, "updates": 2}
-        with open(data_dir + "all_sim_data.pkl", "rb") as f:
+        with open(data_dir + "/all_sim_data.pkl", "rb") as f:
             self.all_data = pickle.load(f)
         """Loads the dataset containing a nested ragged list. Dim as follows: 
         self.all_data[quantity][initial_conditions][no of times same ICs repeated][Time]. 
