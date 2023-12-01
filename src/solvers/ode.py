@@ -1,9 +1,9 @@
 import numpy as np
 import torch
-from torch import nn
 
 
 class simulation_forecast:
+    """Solver for SuperdropNet predictions"""
     def __init__(
         self,
         arr,
@@ -22,16 +22,15 @@ class simulation_forecast:
         self.updates_mean = updates_mean
         self.updates_std = updates_std
         self.model = new_model
+        self.updates_prev = None
         self.moment_preds = []
         self.all_updates = []
-        self.updates_prev = None
         self.real_updates = []
         self.lo_norm = lo_norm
 
     def setup(self):
 
         arr = self.arr.astype(np.float32)
-        # self.arr=np.mean(arr[:,:,719:-1,:],axis=-1)
         arr_new = np.delete((arr[:, :, :]), [3, 6], 1)
         print("Shape during setup:")
         print(arr_new.shape)
@@ -46,21 +45,15 @@ class simulation_forecast:
     # For testing
     def test(self):
         self.setup()
-      
         self.orig = np.ma.compress_rows(self.test_sims[:, 1:5, self.sim_number].squeeze())
         self.sim_data = self.test_sims[0, 1:, self.sim_number].squeeze()
-       
         self.model_params = self.sim_data[-4:-1]
-        
         self.lo = self.sim_data[0] + self.sim_data[2]
         self.model_params[0] = self.lo
         self.create_input()
-        #print(self.inputs)
-        #np.save("/gpfs/home/sharmas/micro-param/initial_conditions/lo_002_rm_13_nu_1.npy",self.inputs.data)
         self.model.eval()
         predictions_updates = self.model.test_step(torch.from_numpy(self.inputs))
         self.moment_calc(predictions_updates)
-        #print(np.ma.compress_rows(self.test_sims[:, :, self.sim_number]).shape)
         for i in range(
             1, np.ma.compress_rows(self.test_sims[:, :, self.sim_number].squeeze()).shape[0]
         ):
@@ -101,8 +94,6 @@ class simulation_forecast:
                 ),
                 axis=1,
             )
-            
-        # new_input_=np.concatenate((predictions_orig_[:,0:],self.model_params.reshape(1,-1),tau.reshape(1,-1),xc.reshape(1,-1)),axis=1)
 
         self.inputs = self.calc_mean(self.real_inputs, self.inputs_mean, self.inputs_std)
         self.inputs = np.float32(self.inputs)
@@ -113,7 +104,6 @@ class simulation_forecast:
         if self.updates[0, 1] > 0:
             self.updates[0, 1] = 0
             
-       
         self.updates[0,0] = -self.updates[0,2]
         
         if self.updates[0, 2] < 0:
@@ -134,12 +124,9 @@ class simulation_forecast:
         if self.preds[0, 3] < 0:
             self.preds[0, 3] = 0
             
-        #Maxima contraints
+        #Maxima constraints
         if self.preds[0, 2] > self.model_params[0]:
             self.preds[0, 2] = self.model_params[0]
-           
-        # if self.preds[0, 0] > self.model_params[0]:
-        #     self.preds[0, 0] = self.model_params[0]
  
             
         if self.preds[0, 1] > self.real_inputs[:,1]:
@@ -157,10 +144,7 @@ class simulation_forecast:
             self.preds = (self.sim_data[0:4] + (self.updates * 20))* self.model_params[1]
         else:
             self.preds = (self.sim_data[0:4] + (self.updates * 20))
-            #self.preds_disp = np.copy(self.preds)
         self.check_preds()
-        
-        # print(self.updates)
         self.moment_preds.append(self.preds_disp)
         self.sim_data = self.preds.reshape(
             -1,
@@ -170,7 +154,7 @@ class simulation_forecast:
 
 
 class SB_forecast:
-
+    """Solver for 0-D two moment bulk scheme. Source:(Seifert and Rasp, 2020)"""
     kcc = 9.44e9  # Long kernel in m3 kg-2 s-1
     kcr = 5.78  # Long kernel in m3 kg-1 s-1
     krr = 4.33
@@ -182,8 +166,6 @@ class SB_forecast:
 
     def __init__(self, arr, sim_num):
 
-        # self.model_params=d[self.start_point,5:8].to('cpu').numpy()*sds[4:7].reshape(1, -1) + means[4:7].reshape(1, -1)
-
         self.lo = arr[0, -4, sim_num]
         self.rm = arr[0, -3, sim_num]
         self.nu = arr[0, -2, sim_num]
@@ -192,16 +174,15 @@ class SB_forecast:
         self.nc = arr[0, 2, sim_num]
         self.lr = arr[0, 4, sim_num]
         self.nr = arr[0, 5, sim_num]
-
+        self.test_sims = arr
+        self.sim_num = sim_num
         self.auto = None
         self.acc = None
         self.scc = None
         self.scr = None
         self.xc0 = None
-
         self.predictions = []
-        self.test_sims = arr
-        self.sim_num = sim_num
+        
 
     def SB_calc(self):
         print(np.ma.compress_rows(self.test_sims[:, :, self.sim_num].squeeze()).shape)
