@@ -1,0 +1,37 @@
+#Exaple config file for 1-step training. 
+data_dir: /gpfs/work/sharmas/mc-snow-data/big_box_data  #Download the data and change this to the data directory's location
+tot_len: 719
+
+sim_num: 100
+avg_dataloader: True
+single_sim_num: None
+moment_scheme: 2
+batch_size: 256
+
+beta: 0.35
+learning_rate: 1e-4
+
+act: torch.nn.ReLU()
+loss_func: null
+
+n_layers: 3
+ns: 200
+
+depth: 9
+p: 0.25
+norm: Standard_Norm
+inputs_mean: null
+inputs_std: null
+loss_absolute: True
+mass_cons_moments: True
+mass_cons_updates: True
+hard_constraints_moments: False
+hard_constraints_updates: False
+multi_step: False
+step_size: 1
+max_epochs: 500
+use_batch_norm: False
+use_dropout: False
+save_dir: /gpfs/work/sharmas/mc-snow-data/whole_data/skip_loss/lr_scheduler #Change this to the location where you want the model to be saved
+pretrained_dir: null  #Change this to ppint to the saved model weights you want the training to start from
+ro_norm: False
