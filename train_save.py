@@ -1,9 +1,11 @@
 import os
 import sys
+
 import pytorch_lightning as pl
 from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+
 from src.models.plModel import LightningModel
 from src.utils.IndexDataloader import DataModule
 
@@ -11,9 +13,9 @@ if len(sys.argv) > 1:
     file_name = sys.argv[1]
 
 else:
-    file_name = "avg_ic.yaml"
+    file_name = "example_config.yaml"
 
-CONFIG_PATH = "conf/all_sims/averaged_sims/"
+CONFIG_PATH = "confs/"
 
 
 def load_config(config_name):
@@ -71,8 +73,8 @@ def cli_main():
         single_sim_num=config.single_sim_num,
         avg_dataloader=config.avg_dataloader,
         pretrained_path=config.pretrained_dir,
-        lo_norm=config.lo_norm,
-        ro_norm=config.ro_norm,
+        lo_norm=False,
+        ro_norm=False,
     )
 
     checkpoint_callback = ModelCheckpoint(
@@ -96,5 +98,3 @@ def cli_main():
 
 if __name__ == "__main__":
     config = load_config(file_name + ".yaml")
-
-    _dm, _model, _trainer = cli_main()
