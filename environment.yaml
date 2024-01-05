@@ -1,24 +1,26 @@
 name: warm-rain
 
 channels:
-  - conda-forge
   - pytorch
-
+  - conda-forge
+  
 dependencies:
   - python=3.8
-  - pip
-  - cudatoolkit
-  - pytorch
+  - pip=22.2.2
+  - pytorch=1.12.1
+  - cudatoolkit=10.2
   - omegaconf 
   - tensorboard
   - torchvision
-  - pytorch-lightning
+  - pytorch-lightning=1.7.3
   - torchmetrics
-  - matplotlib  
+  - matplotlib
+  - ipympl  
   - ipython
   - jupyterlab
   - scikit-learn
   - numpy
   - seaborn
   - tqdm
+  - yaml
  
