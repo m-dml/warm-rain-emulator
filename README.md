@@ -1,4 +1,4 @@
-Code for training SuperdropNet in PyTorch. 
+Code for training SuperdropNet in PyTorch Lightning. 
 
 ## Training Data
 Data can be found at: https://zenodo.org/records/10054101
